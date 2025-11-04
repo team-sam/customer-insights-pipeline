@@ -1,1 +1,0 @@
-# customer-insights-pipeline
