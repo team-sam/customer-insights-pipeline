@@ -46,7 +46,7 @@ class SQLClient:
             query += " WHERE created_at > %s"
             params.append(last_processed_date)
 
-        query += " ORDER BY created_at"
+        
 
         if limit:
             query = f"SELECT TOP {limit} * FROM ({query}) AS subquery"
@@ -121,6 +121,7 @@ class SQLClient:
                 )
             self.conn.commit()
 
+
     def insert_clusters(self, clusters: List[ClusterRecord]) -> None:
         """
         Insert cluster metadata.
@@ -161,3 +162,5 @@ class SQLClient:
                      cluster.created_at)
                 )
             self.conn.commit()
+
+

@@ -1,11 +1,14 @@
 # src/config/settings.py
 from pydantic_settings import BaseSettings
+from pathlib import Path
 
+# Get project root (2 levels up from this file)
+PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 class Settings(BaseSettings):
     # OpenAI
     openai_api_key: str
-    openai_embedding_model: str = "text-embedding-3-large"
+    openai_embedding_model: str = "text-embedding-3-small"
     openai_llm_model: str = "gpt-5-nano"
     
     # SQL Server
@@ -28,5 +31,5 @@ class Settings(BaseSettings):
     embedding_dimension: int = 1536
     
     class Config:
-        env_file = ".env"
+        env_file = str(PROJECT_ROOT / ".env")
         case_sensitive = False

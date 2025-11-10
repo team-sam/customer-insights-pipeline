@@ -43,7 +43,7 @@ class CosmosClient:
 
         CREATE TABLE IF NOT EXISTS embeddings (
             feedback_id VARCHAR(255) PRIMARY KEY,
-            vector vector(3072),
+            vector vector(1536),
             model VARCHAR(100),
             source VARCHAR(50),
             created_at TIMESTAMP
