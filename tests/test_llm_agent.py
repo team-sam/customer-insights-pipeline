@@ -6,18 +6,17 @@ from src.config.settings import Settings
 
 
 @pytest.fixture
-def real_config():
-    """Create a real configuration with OpenAI API key from environment."""
-    # Get API key from environment variable
-    api_key = os.getenv("OPENAI_API_KEY")
+def real_config(pytestconfig):
+    """Create a real configuration with OpenAI API key from command line or environment."""
+    # Try to get API key from command line option first, then environment
+    api_key = getattr(pytestconfig.option, "openai_api_key", None) or Settings().openai_api_key
     if not api_key:
-        pytest.skip("OPENAI_API_KEY environment variable not set")
+        pytest.skip("OpenAI API key not provided via --openai-api-key or environment variable")
     
     # Create a minimal Settings object with required fields
-    # Use default or dummy values for non-OpenAI fields
     return type('Settings', (), {
         'openai_api_key': api_key,
-        'openai_llm_model': 'gpt-3.5-turbo',  # Use a real model name
+        'openai_llm_model': 'gpt-3.5-turbo',
         'openai_embedding_model': 'text-embedding-3-small',
         'sql_server_host': 'dummy',
         'sql_server_database': 'dummy',
