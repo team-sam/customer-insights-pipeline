@@ -12,7 +12,7 @@ from src.config.settings import Settings
 from src.data_access.sql_client import SQLClient
 from src.data_access.cosmos_client import CosmosClient
 from src.embedding.embedder import Embedder
-from src.agents.llm_agent import ChatAgent
+from src.tagging.tagger import FeedbackTagger
 from src.models.schemas import FeedbackRecord, EmbeddingRecord, TagRecord
 
 
@@ -28,27 +28,13 @@ class BackfillPipeline:
         
         Args:
             config: Application settings
-            categories: List of tag categories for LLM tagging. If None, uses default categories.
+            categories: List of tag categories for LLM tagging. If None, uses default categories from FeedbackTagger.
         """
         self.config = config
         self.sql_client = SQLClient(config)
         self.cosmos_client = CosmosClient(config)
         self.embedder = Embedder(config)
-        self.llm_agent = ChatAgent(config)
-        
-        # Default categories for Vessi feedback tagging
-        self.categories = categories or [
-            "Waterproof Leak",
-            "Sizes not standard",
-            "Too Heavy",
-            "Toe Area too narrow",
-            "Uncomfortable",
-            "Quality Issues",
-            "Positive Feedback",
-            "Delivery Issues",
-            "Customer Service",
-            "Uncategorized"
-        ]
+        self.tagger = FeedbackTagger(config, custom_categories=categories)
     
     def run(self, batch_size: Optional[int] = None, limit: Optional[int] = None) -> dict:
         """
@@ -176,13 +162,9 @@ class BackfillPipeline:
         # Extract texts for tagging
         texts = [record.text for record in feedback_batch]
         
-        # Generate tags using LLM batch processing
+        # Generate tags using FeedbackTagger
         logger.info(f"Generating tags for {len(texts)} records")
-        tag_lists = self.llm_agent.tag_feedback_batch(
-            texts, 
-            self.categories, 
-            allow_multiple=True
-        )
+        tag_lists = self.tagger.tag_batch(texts, allow_multiple=True)
         
         # Create tag records
         tag_records = []

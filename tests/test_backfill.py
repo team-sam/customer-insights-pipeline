@@ -56,12 +56,12 @@ def sample_vectors():
 class TestBackfillPipeline:
     """Test BackfillPipeline class."""
     
-    @patch('src.pipelines.backfill.ChatAgent')
+    @patch('src.pipelines.backfill.FeedbackTagger')
     @patch('src.pipelines.backfill.Embedder')
     @patch('src.pipelines.backfill.CosmosClient')
     @patch('src.pipelines.backfill.SQLClient')
     def test_pipeline_initialization(
-        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_chat_agent, mock_config
+        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_tagger, mock_config
     ):
         """Test BackfillPipeline initializes correctly."""
         pipeline = BackfillPipeline(mock_config)
@@ -70,29 +70,27 @@ class TestBackfillPipeline:
         mock_sql_client.assert_called_once_with(mock_config)
         mock_cosmos_client.assert_called_once_with(mock_config)
         mock_embedder.assert_called_once_with(mock_config)
-        mock_chat_agent.assert_called_once_with(mock_config)
-        assert len(pipeline.categories) == 10
-        assert "Waterproof Leak" in pipeline.categories
+        mock_tagger.assert_called_once_with(mock_config, custom_categories=None)
     
-    @patch('src.pipelines.backfill.ChatAgent')
+    @patch('src.pipelines.backfill.FeedbackTagger')
     @patch('src.pipelines.backfill.Embedder')
     @patch('src.pipelines.backfill.CosmosClient')
     @patch('src.pipelines.backfill.SQLClient')
     def test_pipeline_initialization_with_custom_categories(
-        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_chat_agent, mock_config
+        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_tagger, mock_config
     ):
         """Test BackfillPipeline initializes with custom categories."""
         custom_categories = ["Category1", "Category2"]
         pipeline = BackfillPipeline(mock_config, categories=custom_categories)
         
-        assert pipeline.categories == custom_categories
+        mock_tagger.assert_called_once_with(mock_config, custom_categories=custom_categories)
     
-    @patch('src.pipelines.backfill.ChatAgent')
+    @patch('src.pipelines.backfill.FeedbackTagger')
     @patch('src.pipelines.backfill.Embedder')
     @patch('src.pipelines.backfill.CosmosClient')
     @patch('src.pipelines.backfill.SQLClient')
     def test_run_with_no_records(
-        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_chat_agent, 
+        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_tagger, 
         mock_config
     ):
         """Test pipeline run with no records to process."""
@@ -116,12 +114,12 @@ class TestBackfillPipeline:
         mock_sql_instance.close.assert_called_once()
         mock_cosmos_instance.close.assert_called_once()
     
-    @patch('src.pipelines.backfill.ChatAgent')
+    @patch('src.pipelines.backfill.FeedbackTagger')
     @patch('src.pipelines.backfill.Embedder')
     @patch('src.pipelines.backfill.CosmosClient')
     @patch('src.pipelines.backfill.SQLClient')
     def test_run_with_single_batch(
-        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_chat_agent,
+        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_tagger,
         mock_config, sample_feedback_records, sample_vectors
     ):
         """Test pipeline run with single batch of records."""
@@ -134,8 +132,8 @@ class TestBackfillPipeline:
         mock_embedder_instance = mock_embedder.return_value
         mock_embedder_instance.embed_texts.return_value = sample_vectors
         
-        mock_chat_instance = mock_chat_agent.return_value
-        mock_chat_instance.tag_feedback_batch.return_value = [
+        mock_tagger_instance = mock_tagger.return_value
+        mock_tagger_instance.tag_batch.return_value = [
             ["Waterproof Leak"],
             ["Positive Feedback"],
             ["Sizes not standard"]
@@ -165,7 +163,7 @@ class TestBackfillPipeline:
         assert embedding_records[0].vector == sample_vectors[0]
         
         # Verify tagging
-        mock_chat_instance.tag_feedback_batch.assert_called_once()
+        mock_tagger_instance.tag_batch.assert_called_once()
         
         # Verify tags saved
         mock_sql_instance.insert_tags.assert_called_once()
@@ -174,12 +172,12 @@ class TestBackfillPipeline:
         assert tag_records[0].feedback_id == "fb001"
         assert tag_records[0].tag_name == "Waterproof Leak"
     
-    @patch('src.pipelines.backfill.ChatAgent')
+    @patch('src.pipelines.backfill.FeedbackTagger')
     @patch('src.pipelines.backfill.Embedder')
     @patch('src.pipelines.backfill.CosmosClient')
     @patch('src.pipelines.backfill.SQLClient')
     def test_run_with_multiple_batches(
-        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_chat_agent,
+        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_tagger,
         mock_config
     ):
         """Test pipeline run with multiple batches."""
@@ -207,8 +205,8 @@ class TestBackfillPipeline:
             [[0.4] * 1536, [0.5] * 1536]  # Batch 2
         ]
         
-        mock_chat_instance = mock_chat_agent.return_value
-        mock_chat_instance.tag_feedback_batch.side_effect = [
+        mock_tagger_instance = mock_tagger.return_value
+        mock_tagger_instance.tag_batch.side_effect = [
             [["Waterproof Leak"], ["Quality Issues"], ["Positive Feedback"]],  # Batch 1
             [["Sizes not standard"], ["Too Heavy"]]  # Batch 2
         ]
@@ -226,15 +224,15 @@ class TestBackfillPipeline:
         # Verify 2 batches were processed
         assert mock_embedder_instance.embed_texts.call_count == 2
         assert mock_cosmos_instance.insert_embeddings.call_count == 2
-        assert mock_chat_instance.tag_feedback_batch.call_count == 2
+        assert mock_tagger_instance.tag_batch.call_count == 2
         assert mock_sql_instance.insert_tags.call_count == 2
     
-    @patch('src.pipelines.backfill.ChatAgent')
+    @patch('src.pipelines.backfill.FeedbackTagger')
     @patch('src.pipelines.backfill.Embedder')
     @patch('src.pipelines.backfill.CosmosClient')
     @patch('src.pipelines.backfill.SQLClient')
     def test_run_with_limit(
-        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_chat_agent,
+        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_tagger,
         mock_config
     ):
         """Test pipeline run with limit parameter."""
@@ -251,12 +249,12 @@ class TestBackfillPipeline:
         # Verify limit was passed to get_new_feedback
         mock_sql_instance.get_new_feedback.assert_called_once_with(limit=50)
     
-    @patch('src.pipelines.backfill.ChatAgent')
+    @patch('src.pipelines.backfill.FeedbackTagger')
     @patch('src.pipelines.backfill.Embedder')
     @patch('src.pipelines.backfill.CosmosClient')
     @patch('src.pipelines.backfill.SQLClient')
     def test_run_with_error_handling(
-        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_chat_agent,
+        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_tagger,
         mock_config, sample_feedback_records
     ):
         """Test pipeline handles errors gracefully."""
@@ -280,12 +278,12 @@ class TestBackfillPipeline:
         assert stats["tags_created"] == 0
         assert stats["errors"] == 3
     
-    @patch('src.pipelines.backfill.ChatAgent')
+    @patch('src.pipelines.backfill.FeedbackTagger')
     @patch('src.pipelines.backfill.Embedder')
     @patch('src.pipelines.backfill.CosmosClient')
     @patch('src.pipelines.backfill.SQLClient')
     def test_process_embeddings_batch(
-        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_chat_agent,
+        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_tagger,
         mock_config, sample_feedback_records, sample_vectors
     ):
         """Test _process_embeddings_batch method."""
@@ -310,18 +308,18 @@ class TestBackfillPipeline:
         mock_embedder_instance.embed_texts.assert_called_once()
         mock_cosmos_instance.insert_embeddings.assert_called_once_with(result)
     
-    @patch('src.pipelines.backfill.ChatAgent')
+    @patch('src.pipelines.backfill.FeedbackTagger')
     @patch('src.pipelines.backfill.Embedder')
     @patch('src.pipelines.backfill.CosmosClient')
     @patch('src.pipelines.backfill.SQLClient')
     def test_process_tags_batch(
-        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_chat_agent,
+        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_tagger,
         mock_config, sample_feedback_records
     ):
         """Test _process_tags_batch method."""
         # Setup mocks
-        mock_chat_instance = mock_chat_agent.return_value
-        mock_chat_instance.tag_feedback_batch.return_value = [
+        mock_tagger_instance = mock_tagger.return_value
+        mock_tagger_instance.tag_batch.return_value = [
             ["Waterproof Leak"],
             ["Positive Feedback", "Comfortable"],
             ["Sizes not standard"]
@@ -344,15 +342,15 @@ class TestBackfillPipeline:
         assert result[2].feedback_id == "fb002"
         assert result[2].tag_name == "Comfortable"
         
-        mock_chat_instance.tag_feedback_batch.assert_called_once()
+        mock_tagger_instance.tag_batch.assert_called_once()
         mock_sql_instance.insert_tags.assert_called_once_with(result)
     
-    @patch('src.pipelines.backfill.ChatAgent')
+    @patch('src.pipelines.backfill.FeedbackTagger')
     @patch('src.pipelines.backfill.Embedder')
     @patch('src.pipelines.backfill.CosmosClient')
     @patch('src.pipelines.backfill.SQLClient')
     def test_connections_closed_after_run(
-        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_chat_agent,
+        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_tagger,
         mock_config
     ):
         """Test that database connections are closed even on error."""
