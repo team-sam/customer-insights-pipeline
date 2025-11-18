@@ -69,3 +69,4 @@ For setup instructions, see [AZURE_DEPLOYMENT.md](AZURE_DEPLOYMENT.md).
 Current test coverage: 43%
 - 37 tests passing
 - Core components (schemas, embedder, llm_agent, clusterer) all tested
+
