@@ -28,10 +28,21 @@ class SQLClient:
     def get_new_feedback(
         self, 
         last_processed_date: Optional[datetime] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
         limit: Optional[int] = None
     ) -> List[FeedbackRecord]:
         """
         Retrieve new feedback records for processing.
+        
+        Args:
+            last_processed_date: Filter for records after this date (for backward compatibility)
+            start_date: Filter for records on or after this date
+            end_date: Filter for records before or on this date
+            limit: Maximum number of records to return
+        
+        Returns:
+            List of FeedbackRecord objects matching the criteria
         """
         if not self.conn:
             self.connect()
@@ -46,8 +57,14 @@ class SQLClient:
         if last_processed_date:
             query += " AND created_at > %s"
             params.append(last_processed_date)
-
         
+        if start_date:
+            query += " AND created_at >= %s"
+            params.append(start_date)
+        
+        if end_date:
+            query += " AND created_at <= %s"
+            params.append(end_date)
 
         if limit:
             query = f"SELECT TOP {limit} * FROM ({query}) AS subquery"
