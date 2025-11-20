@@ -430,31 +430,6 @@ class FeedbackTagger:
         
         return all_results
     
-    def tag_with_confidence(self, feedback_text: str, num_iterations: int = 3) -> Dict[str, float]:
-        """
-        Tag feedback multiple times and return confidence scores for each category.
-        
-        Args:
-            feedback_text: Customer feedback text
-            num_iterations: Number of times to tag (more iterations = more reliable confidence)
-            
-        Returns:
-            Dict mapping category names to confidence scores (0.0 to 1.0)
-        """
-        all_tags = []
-        
-        for _ in range(num_iterations):
-            tags = self.tag_single(feedback_text, allow_multiple=True)
-            all_tags.extend(tags)
-        
-        # Calculate confidence as frequency of appearance
-        confidence_scores = {}
-        for category in set(all_tags):
-            if category != "Uncategorized":  # Exclude uncategorized from confidence scores
-                confidence_scores[category] = all_tags.count(category) / num_iterations
-        
-        # Sort by confidence descending
-        return dict(sorted(confidence_scores.items(), key=lambda x: x[1], reverse=True))
     
     def get_category_distribution(self, feedback_texts: List[str], 
                                  allow_multiple: bool = True) -> Dict[str, int]:

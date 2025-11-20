@@ -18,7 +18,7 @@ class Embedder:
         self.model = config.openai_embedding_model
         self.max_workers = config.max_workers
     
-    def embed_texts(self, texts: List[str], batch_size: int = 100) -> List[List[float]]:
+    def embed_texts(self, texts: List[str], batch_size: int = 10) -> List[List[float]]:
         """
         Generate embeddings for a list of texts using multithreading.
         
