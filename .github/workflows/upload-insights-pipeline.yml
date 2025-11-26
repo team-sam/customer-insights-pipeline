@@ -1,0 +1,505 @@
+name: Upload Scripts to Azure Storage
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths: 
+      - 'batch_scripts/**'
+      - 'shared/**'
+      - 'shopify/**'
+      - 'netsuite/**'
+      - 'google_analytics/**'
+      - 'data_utils/**'
+      - '.github/workflows/requirements.txt'  # Added this line
+  
+  workflow_dispatch:
+    inputs:
+      force_upload:
+        description: 'Force upload all scripts'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  validate:
+    name: Validate All Scripts
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install dependencies from requirements file
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8
+        
+        # Install from requirements.txt - check workflow folder first
+        if [ -f .github/workflows/requirements.txt ]; then
+          echo "📦 Installing dependencies from .github/workflows/requirements.txt"
+          pip install -r .github/workflows/requirements.txt
+        elif [ -f shared/requirements.txt ]; then
+          echo "📦 Installing dependencies from shared/requirements.txt"
+          pip install -r shared/requirements.txt
+        elif [ -f requirements.txt ]; then
+          echo "📦 Installing dependencies from requirements.txt"
+          pip install -r requirements.txt
+        else
+          echo "📦 Installing basic dependencies for validation"
+          pip install pandas numpy requests azure-storage-blob azure-batch
+        fi
+    
+    - name: Lint all scripts
+      run: |
+        echo "🔍 Validating all Python scripts..."
+        
+        # Find and lint all Python files
+        find . -name "*.py" -not -path "./.git/*" -not -path "./.*" | \
+        xargs flake8 --count --select=E9,F63,F7,F82 --show-source --statistics
+        
+        echo "✅ Basic syntax validation passed"
+    
+    - name: List all scripts to be uploaded
+      run: |
+        echo "📋 Scripts that will be uploaded:"
+        echo "================================"
+        
+        echo "🛍️  Shopify Scripts:"
+        find shopify/ -name "*.py" 2>/dev/null | sort || echo "  No shopify scripts found"
+        
+        echo "💼 NetSuite Scripts:"
+        find netsuite/ -name "*.py" 2>/dev/null | sort || echo "  No netsuite scripts found"
+        
+        echo "📊 Google Analytics Scripts:"
+        find google_analytics/ -name "*.py" 2>/dev/null | sort || echo "  No google_analytics scripts found"
+        
+        echo "🔧 Data Utils Scripts:"
+        find data_utils/ -name "*.py" 2>/dev/null | sort || echo "  No data_utils scripts found"
+        
+        echo "📚 Shared Scripts:"
+        find shared/ -name "*.py" 2>/dev/null | sort || echo "  No shared scripts found"
+        
+        echo "🎯 Batch Scripts:"
+        find batch_scripts/ -name "*.py" 2>/dev/null | sort || echo "  No batch_scripts found"
+    
+    - name: Check requirements files
+      run: |
+        echo "📋 Checking requirements files..."
+        
+        if [ -f .github/workflows/requirements.txt ]; then
+          echo "✅ Found .github/workflows/requirements.txt:"
+          cat .github/workflows/requirements.txt
+        fi
+        
+        if [ -f shared/requirements.txt ]; then
+          echo "✅ Found shared/requirements.txt:"
+          cat shared/requirements.txt
+        fi
+        
+        if [ -f requirements.txt ]; then
+          echo "✅ Found requirements.txt:"
+          cat requirements.txt
+        fi
+        
+        if [ ! -f .github/workflows/requirements.txt ] && [ ! -f shared/requirements.txt ] && [ ! -f requirements.txt ]; then
+          echo "⚠️  No requirements.txt file found. Consider creating one."
+        fi
+
+  upload-scripts:
+    name: Upload All Scripts to Azure Storage
+    runs-on: ubuntu-latest
+    needs: validate
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install Azure CLI and dependencies
+      run: |
+        curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+        python -m pip install --upgrade pip
+        pip install azure-storage-blob azure-identity
+    
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+        enable-AzPSSession: false
+    
+    - name: Verify Azure Login
+      run: |
+        echo "🔍 Verifying Azure login..."
+        az account show --output table
+        echo "✅ Azure login successful"
+    
+    - name: Ensure required containers exist
+      run: |
+        echo "📦 Ensuring required storage containers exist..."
+        
+        # Function to create container if it doesn't exist
+        create_container_if_not_exists() {
+          local container_name=$1
+          
+          echo "🔍 Checking if container '$container_name' exists..."
+          
+          # Try to create the container using auth-mode login
+          if az storage container create \
+            --name $container_name \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --auth-mode login \
+            --output none 2>/dev/null; then
+            echo "  ✅ Created '$container_name' container"
+          else
+            # Container might already exist, let's check
+            if az storage container show \
+              --name $container_name \
+              --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+              --auth-mode login \
+              --output none 2>/dev/null; then
+              echo "  ✅ '$container_name' container already exists"
+            else
+              echo "  ❌ Failed to create or verify '$container_name' container"
+              exit 1
+            fi
+          fi
+        }
+        
+        # Create required containers
+        create_container_if_not_exists "scripts"
+        create_container_if_not_exists "input-data"
+        create_container_if_not_exists "output-data"
+        create_container_if_not_exists "logs"
+        
+        echo "📦 All required containers are ready!"
+    
+    - name: Upload Shopify scripts
+      run: |
+        echo "🛍️ Uploading Shopify scripts..."
+        
+        if [ -d "shopify" ]; then
+          # Upload each Python file in shopify folder
+          find shopify/ -name "*.py" | while read -r file; do
+            if [ -f "$file" ]; then
+              # Get relative path from shopify/ folder
+              relative_path=${file#shopify/}
+              blob_name="shopify/$relative_path"
+              
+              echo "📤 Uploading $blob_name..."
+              az storage blob upload \
+                --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+                --container-name scripts \
+                --name "$blob_name" \
+                --file "$file" \
+                --overwrite \
+                --auth-mode login
+              
+              echo "  ✅ Uploaded $blob_name"
+            fi
+          done
+        else
+          echo "  ⚠️ No shopify folder found"
+        fi
+    
+    - name: Upload NetSuite scripts
+      run: |
+        echo "💼 Uploading NetSuite scripts..."
+        
+        if [ -d "netsuite" ]; then
+          find netsuite/ -name "*.py" | while read -r file; do
+            if [ -f "$file" ]; then
+              relative_path=${file#netsuite/}
+              blob_name="netsuite/$relative_path"
+              
+              echo "📤 Uploading $blob_name..."
+              az storage blob upload \
+                --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+                --container-name scripts \
+                --name "$blob_name" \
+                --file "$file" \
+                --overwrite \
+                --auth-mode login
+              
+              echo "  ✅ Uploaded $blob_name"
+            fi
+          done
+        else
+          echo "  ⚠️ No netsuite folder found"
+        fi
+    
+    - name: Upload Google Analytics scripts
+      run: |
+        echo "📊 Uploading Google Analytics scripts..."
+        
+        if [ -d "google_analytics" ]; then
+          find google_analytics/ -name "*.py" | while read -r file; do
+            if [ -f "$file" ]; then
+              relative_path=${file#google_analytics/}
+              blob_name="google_analytics/$relative_path"
+              
+              echo "📤 Uploading $blob_name..."
+              az storage blob upload \
+                --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+                --container-name scripts \
+                --name "$blob_name" \
+                --file "$file" \
+                --overwrite \
+                --auth-mode login
+              
+              echo "  ✅ Uploaded $blob_name"
+            fi
+          done
+        else
+          echo "  ⚠️ No google_analytics folder found"
+        fi
+    
+    - name: Upload Data Utils scripts
+      run: |
+        echo "🔧 Uploading Data Utils scripts..."
+        
+        if [ -d "data_utils" ]; then
+          find data_utils/ -name "*.py" | while read -r file; do
+            if [ -f "$file" ]; then
+              relative_path=${file#data_utils/}
+              blob_name="data_utils/$relative_path"
+              
+              echo "📤 Uploading $blob_name..."
+              az storage blob upload \
+                --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+                --container-name scripts \
+                --name "$blob_name" \
+                --file "$file" \
+                --overwrite \
+                --auth-mode login
+              
+              echo "  ✅ Uploaded $blob_name"
+            fi
+          done
+        else
+          echo "  ⚠️ No data_utils folder found"
+        fi
+    
+    - name: Upload Shared scripts
+      run: |
+        echo "📚 Uploading Shared scripts..."
+        
+        if [ -d "shared" ]; then
+          find shared/ -name "*.py" | while read -r file; do
+            if [ -f "$file" ] && [[ "$file" != *"pipeline_build.py" ]]; then
+              relative_path=${file#shared/}
+              blob_name="shared/$relative_path"
+              
+              echo "📤 Uploading $blob_name..."
+              az storage blob upload \
+                --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+                --container-name scripts \
+                --name "$blob_name" \
+                --file "$file" \
+                --overwrite \
+                --auth-mode login
+              
+              echo "  ✅ Uploaded $blob_name"
+            fi
+          done
+        else
+          echo "  ⚠️ No shared folder found"
+        fi
+    
+    - name: Upload Batch scripts
+      run: |
+        echo "🎯 Uploading Batch scripts..."
+        
+        if [ -d "batch_scripts" ]; then
+          find batch_scripts/ -name "*.py" | while read -r file; do
+            if [ -f "$file" ]; then
+              relative_path=${file#batch_scripts/}
+              blob_name="batch_scripts/$relative_path"
+              
+              echo "📤 Uploading $blob_name..."
+              az storage blob upload \
+                --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+                --container-name scripts \
+                --name "$blob_name" \
+                --file "$file" \
+                --overwrite \
+                --auth-mode login
+              
+              echo "  ✅ Uploaded $blob_name"
+            fi
+          done
+        else
+          echo "  ⚠️ No batch_scripts folder found"
+        fi
+    
+    - name: Upload requirements file
+      run: |
+        echo "📤 Uploading requirements file..."
+        
+        # Upload requirements.txt for easy access by ADF - check workflow folder first
+        if [ -f ".github/workflows/requirements.txt" ]; then
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name "requirements.txt" \
+            --file ".github/workflows/requirements.txt" \
+            --overwrite \
+            --auth-mode login
+          echo "  ✅ Uploaded .github/workflows/requirements.txt"
+        elif [ -f "shared/requirements.txt" ]; then
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name "requirements.txt" \
+            --file "shared/requirements.txt" \
+            --overwrite \
+            --auth-mode login
+          echo "  ✅ Uploaded shared/requirements.txt"
+        elif [ -f "requirements.txt" ]; then
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name "requirements.txt" \
+            --file "requirements.txt" \
+            --overwrite \
+            --auth-mode login
+          echo "  ✅ Uploaded requirements.txt"
+        else
+          echo "  ⚠️  No requirements.txt file found to upload"
+        fi
+    
+    - name: Create script inventory
+      run: |
+        echo "📋 Creating script inventory for ADF..."
+        
+        # Create timestamp for versioning
+        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+        COMMIT_SHA=${GITHUB_SHA:0:7}
+        VERSION="${TIMESTAMP}-${COMMIT_SHA}"
+        
+        # Determine requirements file location
+        REQ_FILE_LOCATION="none"
+        if [ -f ".github/workflows/requirements.txt" ]; then
+          REQ_FILE_LOCATION=".github/workflows/requirements.txt"
+        elif [ -f "shared/requirements.txt" ]; then
+          REQ_FILE_LOCATION="shared/requirements.txt"
+        elif [ -f "requirements.txt" ]; then
+          REQ_FILE_LOCATION="requirements.txt"
+        fi
+        
+        # Create a JSON inventory of all available scripts
+        cat > script_inventory.json << EOF
+        {
+          "version": "$VERSION",
+          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "commit_sha": "${GITHUB_SHA}",
+          "requirements_file": "$REQ_FILE_LOCATION",
+          "upload_type": "individual_files",
+          "storage_structure": {
+            "base_url": "https://${{ secrets.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/scripts",
+            "folders": {
+              "shopify": "shopify/",
+              "netsuite": "netsuite/",
+              "google_analytics": "google_analytics/",
+              "data_utils": "data_utils/",
+              "shared": "shared/",
+              "batch_scripts": "batch_scripts/"
+            }
+          },
+          "data_sources": {
+            "shopify": {
+              "folder": "shopify",
+              "scripts": $(find shopify/ -name "*.py" 2>/dev/null | sed 's|shopify/||' | sed 's|\.py$||' | jq -R . | jq -s . || echo '[]')
+            },
+            "netsuite": {
+              "folder": "netsuite",
+              "scripts": $(find netsuite/ -name "*.py" 2>/dev/null | sed 's|netsuite/||' | sed 's|\.py$||' | jq -R . | jq -s . || echo '[]')
+            },
+            "google_analytics": {
+              "folder": "google_analytics",
+              "scripts": $(find google_analytics/ -name "*.py" 2>/dev/null | sed 's|google_analytics/||' | sed 's|\.py$||' | jq -R . | jq -s . || echo '[]')
+            },
+            "data_utils": {
+              "folder": "data_utils",
+              "scripts": $(find data_utils/ -name "*.py" 2>/dev/null | sed 's|data_utils/||' | sed 's|\.py$||' | jq -R . | jq -s . || echo '[]')
+            }
+          },
+          "shared_dependencies": $(find shared/ -name "*.py" 2>/dev/null | sed 's|shared/||' | sed 's|\.py$||' | jq -R . | jq -s . || echo '[]')
+        }
+        EOF
+        
+        echo "📋 Script inventory created:"
+        cat script_inventory.json | jq .
+    
+    - name: Upload script inventory
+      run: |
+        echo "📤 Uploading script inventory..."
+        
+        az storage blob upload \
+          --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+          --container-name scripts \
+          --name "inventory/script_inventory.json" \
+          --file "script_inventory.json" \
+          --overwrite \
+          --auth-mode login
+        
+        echo "✅ Script inventory uploaded"
+    
+    - name: List uploaded files
+      run: |
+        echo "📋 Listing all uploaded files in storage..."
+        az storage blob list \
+          --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+          --container-name scripts \
+          --auth-mode login \
+          --output table \
+          --query "[].{Name:name, Size:properties.contentLength, LastModified:properties.lastModified}"
+    
+    - name: Summary
+      run: |
+        echo "🎉 Script upload completed successfully!"
+        echo "=================================="
+        echo "📁 Scripts uploaded as individual files to:"
+        echo "  • shopify/ folder"
+        echo "  • netsuite/ folder"
+        echo "  • google_analytics/ folder"
+        echo "  • data_utils/ folder"
+        echo "  • shared/ folder"
+        echo "  • batch_scripts/ folder"
+        echo ""
+        echo "📋 Script inventory: inventory/script_inventory.json"
+        echo "📋 Requirements file: requirements.txt"
+        echo "🔗 Storage URL: https://${{ secrets.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/scripts/"
+        echo ""
+        echo "🎯 Individual files can now be accessed directly in Azure Data Factory!"
+
+  notify:
+    name: Notify Upload Status
+    runs-on: ubuntu-latest
+    needs: [validate, upload-scripts]
+    if: always()
+    
+    steps:
+    - name: Upload Status
+      run: |
+        if [ "${{ needs.upload-scripts.result }}" == "success" ]; then
+          echo "✅ All scripts uploaded successfully to Azure Storage!"
+          echo "🎯 Ready for use in Azure Data Factory pipelines"
+          echo "📍 Storage Account: ${{ secrets.AZURE_STORAGE_ACCOUNT }}"
+          echo "📍 Container: scripts/"
+          echo "📁 Files are organized in folders by data source"
+        else
+          echo "❌ Script upload failed!"
+          echo "📋 Check the logs above for details"
+        fi
