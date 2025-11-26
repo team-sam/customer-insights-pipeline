@@ -25,7 +25,7 @@ az storage account create \
 
 # Create a container for scripts
 az storage container create \
-  --name scripts \
+  --name customer-insights-pipeline \
   --account-name customerinsightsstorage
 ```
 
@@ -92,14 +92,13 @@ The GitHub Actions workflow will automatically run when:
 The workflow performs the following steps:
 
 1. **Validation** - Lints all Python scripts for syntax errors
-2. **Container Setup** - Ensures the `scripts` container exists in Azure Storage
-3. **Upload Scripts** - Uploads individual Python files from `scripts/` and `src/` directories
+2. **Container Setup** - Ensures the `customer-insights-pipeline` container exists in Azure Storage
+3. **Upload Scripts** - Uploads individual Python files from various directories
 4. **Script Inventory** - Creates a JSON inventory file with versioning information
 5. **Verification** - Lists all uploaded files
 
 Files uploaded to Azure Blob Storage:
-- All Python scripts from the `scripts/` directory → `scripts/` folder in blob storage
-- All Python source code from the `src/` directory → `src/` folder in blob storage
+- All Python scripts are organized by data source in the `customer-insights-pipeline` container
 - The `requirements.txt` file → root of blob storage
 - Script inventory JSON → `inventory/script_inventory.json`
 
@@ -130,16 +129,16 @@ After the workflow runs, you can verify the deployment:
 # List uploaded files
 az storage blob list \
   --account-name customerinsightsstorage \
-  --container-name scripts \
+  --container-name customer-insights-pipeline \
   --auth-mode login \
   --output table
 
 # Download a file to verify
 az storage blob download \
   --account-name customerinsightsstorage \
-  --container-name scripts \
-  --name scripts/run_daily_pipeline.py \
-  --file downloaded_script.py \
+  --container-name customer-insights-pipeline \
+  --name requirements.txt \
+  --file downloaded_requirements.txt \
   --auth-mode login
 ```
 
