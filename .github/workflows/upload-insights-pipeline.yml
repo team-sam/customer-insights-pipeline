@@ -178,10 +178,7 @@ jobs:
         }
         
         # Create required containers
-        create_container_if_not_exists "scripts"
-        create_container_if_not_exists "input-data"
-        create_container_if_not_exists "output-data"
-        create_container_if_not_exists "logs"
+        create_container_if_not_exists "customer-insights-pipeline"
         
         echo "📦 All required containers are ready!"
     
@@ -200,7 +197,7 @@ jobs:
               echo "📤 Uploading $blob_name..."
               az storage blob upload \
                 --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-                --container-name scripts \
+                --container-name customer-insights-pipeline \
                 --name "$blob_name" \
                 --file "$file" \
                 --overwrite \
@@ -226,7 +223,7 @@ jobs:
               echo "📤 Uploading $blob_name..."
               az storage blob upload \
                 --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-                --container-name scripts \
+                --container-name customer-insights-pipeline \
                 --name "$blob_name" \
                 --file "$file" \
                 --overwrite \
@@ -252,7 +249,7 @@ jobs:
               echo "📤 Uploading $blob_name..."
               az storage blob upload \
                 --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-                --container-name scripts \
+                --container-name customer-insights-pipeline \
                 --name "$blob_name" \
                 --file "$file" \
                 --overwrite \
@@ -278,7 +275,7 @@ jobs:
               echo "📤 Uploading $blob_name..."
               az storage blob upload \
                 --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-                --container-name scripts \
+                --container-name customer-insights-pipeline \
                 --name "$blob_name" \
                 --file "$file" \
                 --overwrite \
@@ -304,7 +301,7 @@ jobs:
               echo "📤 Uploading $blob_name..."
               az storage blob upload \
                 --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-                --container-name scripts \
+                --container-name customer-insights-pipeline \
                 --name "$blob_name" \
                 --file "$file" \
                 --overwrite \
@@ -330,7 +327,7 @@ jobs:
               echo "📤 Uploading $blob_name..."
               az storage blob upload \
                 --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-                --container-name scripts \
+                --container-name customer-insights-pipeline \
                 --name "$blob_name" \
                 --file "$file" \
                 --overwrite \
@@ -351,7 +348,7 @@ jobs:
         if [ -f ".github/workflows/requirements.txt" ]; then
           az storage blob upload \
             --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
+            --container-name customer-insights-pipeline \
             --name "requirements.txt" \
             --file ".github/workflows/requirements.txt" \
             --overwrite \
@@ -360,7 +357,7 @@ jobs:
         elif [ -f "shared/requirements.txt" ]; then
           az storage blob upload \
             --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
+            --container-name customer-insights-pipeline \
             --name "requirements.txt" \
             --file "shared/requirements.txt" \
             --overwrite \
@@ -369,7 +366,7 @@ jobs:
         elif [ -f "requirements.txt" ]; then
           az storage blob upload \
             --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
+            --container-name customer-insights-pipeline \
             --name "requirements.txt" \
             --file "requirements.txt" \
             --overwrite \
@@ -407,7 +404,7 @@ jobs:
           "requirements_file": "$REQ_FILE_LOCATION",
           "upload_type": "individual_files",
           "storage_structure": {
-            "base_url": "https://${{ secrets.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/scripts",
+            "base_url": "https://${{ secrets.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/customer-insights-pipeline",
             "folders": {
               "shopify": "shopify/",
               "netsuite": "netsuite/",
@@ -448,7 +445,7 @@ jobs:
         
         az storage blob upload \
           --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-          --container-name scripts \
+          --container-name customer-insights-pipeline \
           --name "inventory/script_inventory.json" \
           --file "script_inventory.json" \
           --overwrite \
@@ -461,7 +458,7 @@ jobs:
         echo "📋 Listing all uploaded files in storage..."
         az storage blob list \
           --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-          --container-name scripts \
+          --container-name customer-insights-pipeline \
           --auth-mode login \
           --output table \
           --query "[].{Name:name, Size:properties.contentLength, LastModified:properties.lastModified}"
@@ -480,7 +477,7 @@ jobs:
         echo ""
         echo "📋 Script inventory: inventory/script_inventory.json"
         echo "📋 Requirements file: requirements.txt"
-        echo "🔗 Storage URL: https://${{ secrets.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/scripts/"
+        echo "🔗 Storage URL: https://${{ secrets.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/customer-insights-pipeline/"
         echo ""
         echo "🎯 Individual files can now be accessed directly in Azure Data Factory!"
 
@@ -497,7 +494,7 @@ jobs:
           echo "✅ All scripts uploaded successfully to Azure Storage!"
           echo "🎯 Ready for use in Azure Data Factory pipelines"
           echo "📍 Storage Account: ${{ secrets.AZURE_STORAGE_ACCOUNT }}"
-          echo "📍 Container: scripts/"
+          echo "📍 Container: customer-insights-pipeline/"
           echo "📁 Files are organized in folders by data source"
         else
           echo "❌ Script upload failed!"
