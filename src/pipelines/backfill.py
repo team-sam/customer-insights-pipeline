@@ -57,8 +57,6 @@ class BackfillPipeline:
             self.sql_client.connect()
             self.cosmos_client.connect()
             
-            # Fetch all feedback records
-            logger.info("Fetching feedback records from SQL database")
             feedback_records = self.sql_client.get_new_feedback(limit=limit)
             total_records = len(feedback_records)
             logger.info(f"Found {total_records} feedback records to process")
@@ -85,11 +83,9 @@ class BackfillPipeline:
                 logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch)} records)")
                 
                 try:
-                    # Generate embeddings
                     embeddings_batch = self._process_embeddings_batch(batch)
                     embeddings_created += len(embeddings_batch)
                     
-                    # Generate tags
                     tags_batch = self._process_tags_batch(batch)
                     tags_created += len(tags_batch)
                     
