@@ -35,13 +35,13 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
     
     - name: Install dependencies from requirements file
       run: |
         python -m pip install --upgrade pip
         pip install flake8
         
-        # Install from requirements.txt
         if [ -f requirements.txt ]; then
           echo "📦 Installing dependencies from requirements.txt"
           pip install -r requirements.txt
@@ -53,44 +53,21 @@ jobs:
     - name: Lint all scripts
       run: |
         echo "🔍 Validating all Python scripts..."
-        
-        # Find and lint all Python files
         find . -name "*.py" -not -path "./.git/*" -not -path "./.*" | \
         xargs flake8 --count --select=E9,F63,F7,F82 --show-source --statistics
-        
         echo "✅ Basic syntax validation passed"
     
     - name: List all scripts to be uploaded
       run: |
         echo "📋 Scripts that will be uploaded:"
         echo "================================"
-        
         echo "📂 Source Scripts:"
         find src/ -name "*.py" 2>/dev/null | sort || echo "  No src scripts found"
-        
         echo "🧪 Test Scripts:"
         find tests/ -name "*.py" 2>/dev/null | sort || echo "  No test scripts found"
-    
-    - name: Check requirements files
-      run: |
-        echo "📋 Checking requirements files..."
-        
-        if [ -f requirements.txt ]; then
-          echo "✅ Found requirements.txt:"
-          cat requirements.txt
-        fi
-        
-        if [ -f requirements-dev.txt ]; then
-          echo "✅ Found requirements-dev.txt:"
-          cat requirements-dev.txt
-        fi
-        
-        if [ ! -f requirements.txt ]; then
-          echo "⚠️  No requirements.txt file found. Consider creating one."
-        fi
 
-  upload-scripts:
-    name: Upload All Scripts to Azure Storage
+  package-and-upload:
+    name: Package and Upload to Azure Storage
     runs-on: ubuntu-latest
     needs: validate
     
@@ -102,6 +79,49 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Create deployment package
+      run: |
+        echo "📦 Creating deployment package..."
+        
+        # Create timestamp for versioning
+        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+        COMMIT_SHA=${GITHUB_SHA:0:7}
+        VERSION="${TIMESTAMP}-${COMMIT_SHA}"
+        
+        echo "📋 Version: $VERSION"
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
+        
+        # Create package directory
+        mkdir -p package
+        
+        # Copy all necessary files
+        cp -r src/ package/
+        [ -d tests ] && cp -r tests/ package/ || echo "No tests directory"
+        [ -f setup.py ] && cp setup.py package/ || echo "No setup.py"
+        [ -f requirements.txt ] && cp requirements.txt package/ || echo "No requirements.txt"
+        [ -f requirements-dev.txt ] && cp requirements-dev.txt package/ || echo "No requirements-dev.txt"
+        
+        # Create a version file
+        cat > package/VERSION.txt << EOF
+        Version: $VERSION
+        Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+        Commit: ${GITHUB_SHA}
+        Branch: ${GITHUB_REF#refs/heads/}
+        EOF
+        
+        echo "✅ Package contents prepared"
+        ls -la package/
+    
+    - name: Create ZIP archive
+      run: |
+        echo "🗜️ Creating ZIP archive..."
+        cd package
+        zip -r ../customer-insights-pipeline.zip . -x "**/__pycache__/*" -x "**/*.pyc" -x "**/.*"
+        cd ..
+        
+        echo "✅ ZIP archive created"
+        ls -lh customer-insights-pipeline.zip
     
     - name: Install Azure CLI and dependencies
       run: |
@@ -125,13 +145,10 @@ jobs:
       run: |
         echo "📦 Ensuring required storage containers exist..."
         
-        # Function to create container if it doesn't exist
         create_container_if_not_exists() {
           local container_name=$1
-          
           echo "🔍 Checking if container '$container_name' exists..."
           
-          # Try to create the container using auth-mode login
           if az storage container create \
             --name $container_name \
             --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
@@ -139,7 +156,6 @@ jobs:
             --output none 2>/dev/null; then
             echo "  ✅ Created '$container_name' container"
           else
-            # Container might already exist, let's check
             if az storage container show \
               --name $container_name \
               --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
@@ -153,87 +169,39 @@ jobs:
           fi
         }
         
-        # Create required containers
         create_container_if_not_exists "customer-insights-pipeline"
-        
         echo "📦 All required containers are ready!"
     
-    - name: Upload src scripts
+    - name: Upload ZIP package
       run: |
-        echo "📂 Uploading src scripts..."
+        echo "📤 Uploading ZIP package to Azure Storage..."
         
-        if [ -d "src" ]; then
-          # Upload each Python file in src folder
-          find src/ -name "*.py" | while read -r file; do
-            if [ -f "$file" ]; then
-              # Get relative path from src/ folder
-              relative_path=${file#src/}
-              blob_name="src/$relative_path"
-              
-              echo "📤 Uploading $blob_name..."
-              az storage blob upload \
-                --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-                --container-name customer-insights-pipeline \
-                --name "$blob_name" \
-                --file "$file" \
-                --overwrite \
-                --auth-mode login
-              
-              echo "  ✅ Uploaded $blob_name"
-            fi
-          done
-        else
-          echo "  ⚠️ No src folder found"
-        fi
+        # Upload the latest version
+        az storage blob upload \
+          --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+          --container-name customer-insights-pipeline \
+          --name "customer-insights-pipeline.zip" \
+          --file "customer-insights-pipeline.zip" \
+          --overwrite \
+          --auth-mode login
+        
+        echo "✅ ZIP package uploaded as customer-insights-pipeline.zip"
+        
+        # Also upload with version tag for rollback capability
+        az storage blob upload \
+          --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+          --container-name customer-insights-pipeline \
+          --name "versions/customer-insights-pipeline-${{ env.VERSION }}.zip" \
+          --file "customer-insights-pipeline.zip" \
+          --overwrite \
+          --auth-mode login
+        
+        echo "✅ Versioned copy uploaded as versions/customer-insights-pipeline-${{ env.VERSION }}.zip"
     
-    - name: Upload test scripts
+    - name: Upload requirements.txt separately
       run: |
-        echo "🧪 Uploading test scripts..."
+        echo "📤 Uploading requirements.txt for easy access..."
         
-        if [ -d "tests" ]; then
-          find tests/ -name "*.py" | while read -r file; do
-            if [ -f "$file" ]; then
-              relative_path=${file#tests/}
-              blob_name="tests/$relative_path"
-              
-              echo "📤 Uploading $blob_name..."
-              az storage blob upload \
-                --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-                --container-name customer-insights-pipeline \
-                --name "$blob_name" \
-                --file "$file" \
-                --overwrite \
-                --auth-mode login
-              
-              echo "  ✅ Uploaded $blob_name"
-            fi
-          done
-        else
-          echo "  ⚠️ No tests folder found"
-        fi
-    
-    - name: Upload setup.py
-      run: |
-        echo "⚙️ Uploading setup.py..."
-        
-        if [ -f "setup.py" ]; then
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name customer-insights-pipeline \
-            --name "setup.py" \
-            --file "setup.py" \
-            --overwrite \
-            --auth-mode login
-          echo "  ✅ Uploaded setup.py"
-        else
-          echo "  ⚠️ No setup.py found"
-        fi
-    
-    - name: Upload requirements files
-      run: |
-        echo "📤 Uploading requirements files..."
-        
-        # Upload requirements.txt for easy access by ADF
         if [ -f "requirements.txt" ]; then
           az storage blob upload \
             --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
@@ -242,147 +210,97 @@ jobs:
             --file "requirements.txt" \
             --overwrite \
             --auth-mode login
-          echo "  ✅ Uploaded requirements.txt"
-        else
-          echo "  ⚠️  No requirements.txt file found to upload"
-        fi
-        
-        # Upload requirements-dev.txt
-        if [ -f "requirements-dev.txt" ]; then
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name customer-insights-pipeline \
-            --name "requirements-dev.txt" \
-            --file "requirements-dev.txt" \
-            --overwrite \
-            --auth-mode login
-          echo "  ✅ Uploaded requirements-dev.txt"
-        else
-          echo "  ⚠️  No requirements-dev.txt file found to upload"
+          echo "✅ Uploaded requirements.txt"
         fi
     
-    - name: Create script inventory
+    - name: Create deployment manifest
       run: |
-        echo "📋 Creating script inventory for ADF..."
+        echo "📋 Creating deployment manifest..."
         
-        # Create timestamp for versioning
-        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-        COMMIT_SHA=${GITHUB_SHA:0:7}
-        VERSION="${TIMESTAMP}-${COMMIT_SHA}"
-        
-        # Determine requirements file location
-        REQ_FILE_LOCATION="none"
-        if [ -f "requirements.txt" ]; then
-          REQ_FILE_LOCATION="requirements.txt"
-        fi
-        
-        # Create a JSON inventory of all available scripts
-        cat > script_inventory.json << EOF
+        cat > deployment_manifest.json << EOF
         {
-          "version": "$VERSION",
+          "version": "${{ env.VERSION }}",
           "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
           "commit_sha": "${GITHUB_SHA}",
-          "requirements_file": "$REQ_FILE_LOCATION",
-          "upload_type": "individual_files",
-          "storage_structure": {
-            "base_url": "https://${{ secrets.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/customer-insights-pipeline",
-            "folders": {
-              "src": "src/",
-              "tests": "tests/"
-            }
+          "branch": "${GITHUB_REF#refs/heads/}",
+          "package_format": "zip",
+          "package_url": "https://${{ secrets.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/customer-insights-pipeline/customer-insights-pipeline.zip",
+          "requirements_url": "https://${{ secrets.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/customer-insights-pipeline/requirements.txt",
+          "modules": [
+            "agents",
+            "clustering",
+            "config",
+            "data_access",
+            "embedding",
+            "models",
+            "pipelines",
+            "tagging"
+          ],
+          "entry_points": {
+            "ingest": "src.pipelines.ingest",
+            "backfill": "src.pipelines.backfill",
+            "monthly_clustering": "src.pipelines.monthly_clustering"
           },
-          "modules": {
-            "agents": {
-              "folder": "src/agents",
-              "scripts": $(find src/agents/ -name "*.py" 2>/dev/null | sed 's|src/agents/||' | sed 's|\.py$||' | jq -R . | jq -s . || echo '[]')
-            },
-            "clustering": {
-              "folder": "src/clustering",
-              "scripts": $(find src/clustering/ -name "*.py" 2>/dev/null | sed 's|src/clustering/||' | sed 's|\.py$||' | jq -R . | jq -s . || echo '[]')
-            },
-            "config": {
-              "folder": "src/config",
-              "scripts": $(find src/config/ -name "*.py" 2>/dev/null | sed 's|src/config/||' | sed 's|\.py$||' | jq -R . | jq -s . || echo '[]')
-            },
-            "data_access": {
-              "folder": "src/data_access",
-              "scripts": $(find src/data_access/ -name "*.py" 2>/dev/null | sed 's|src/data_access/||' | sed 's|\.py$||' | jq -R . | jq -s . || echo '[]')
-            },
-            "embedding": {
-              "folder": "src/embedding",
-              "scripts": $(find src/embedding/ -name "*.py" 2>/dev/null | sed 's|src/embedding/||' | sed 's|\.py$||' | jq -R . | jq -s . || echo '[]')
-            },
-            "models": {
-              "folder": "src/models",
-              "scripts": $(find src/models/ -name "*.py" 2>/dev/null | sed 's|src/models/||' | sed 's|\.py$||' | jq -R . | jq -s . || echo '[]')
-            },
-            "pipelines": {
-              "folder": "src/pipelines",
-              "scripts": $(find src/pipelines/ -name "*.py" 2>/dev/null | sed 's|src/pipelines/||' | sed 's|\.py$||' | jq -R . | jq -s . || echo '[]')
-            }
-          },
-          "tests": $(find tests/ -name "*.py" 2>/dev/null | sed 's|tests/||' | sed 's|\.py$||' | jq -R . | jq -s . || echo '[]')
+          "installation_instructions": "Download and extract customer-insights-pipeline.zip, then run: pip install -r requirements.txt"
         }
         EOF
         
-        echo "📋 Script inventory created:"
-        cat script_inventory.json | jq .
+        echo "📋 Deployment manifest created:"
+        cat deployment_manifest.json | jq .
     
-    - name: Upload script inventory
+    - name: Upload deployment manifest
       run: |
-        echo "📤 Uploading script inventory..."
+        echo "📤 Uploading deployment manifest..."
         
         az storage blob upload \
           --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
           --container-name customer-insights-pipeline \
-          --name "inventory/script_inventory.json" \
-          --file "script_inventory.json" \
+          --name "deployment_manifest.json" \
+          --file "deployment_manifest.json" \
           --overwrite \
           --auth-mode login
         
-        echo "✅ Script inventory uploaded"
+        echo "✅ Deployment manifest uploaded"
     
     - name: List uploaded files
       run: |
-        echo "📋 Listing all uploaded files in storage..."
+        echo "📋 Listing uploaded files in storage..."
         az storage blob list \
           --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
           --container-name customer-insights-pipeline \
           --auth-mode login \
           --output table \
-          --query "[].{Name:name, Size:properties.contentLength, LastModified:properties.lastModified}"
+          --query "[?!starts_with(name, 'versions/')].{Name:name, Size:properties.contentLength, LastModified:properties.lastModified}"
     
     - name: Summary
       run: |
-        echo "🎉 Script upload completed successfully!"
-        echo "=================================="
-        echo "📁 Scripts uploaded as individual files to:"
-        echo "  • src/ folder (agents, clustering, config, data_access, embedding, models, pipelines)"
-        echo "  • tests/ folder"
-        echo "  • setup.py"
+        echo "🎉 Deployment package uploaded successfully!"
+        echo "=========================================="
+        echo "📦 Package: customer-insights-pipeline.zip"
+        echo "📋 Version: ${{ env.VERSION }}"
+        echo "🔗 Package URL: https://${{ secrets.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/customer-insights-pipeline/customer-insights-pipeline.zip"
         echo ""
-        echo "📋 Script inventory: inventory/script_inventory.json"
-        echo "📋 Requirements files: requirements.txt, requirements-dev.txt"
-        echo "🔗 Storage URL: https://${{ secrets.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/customer-insights-pipeline/"
-        echo ""
-        echo "🎯 Individual files can now be accessed directly in Azure Data Factory!"
+        echo "📝 To use in Azure Batch:"
+        echo "  1. Extract the ZIP in your Batch start task"
+        echo "  2. Install dependencies: pip install -r requirements.txt"
+        echo "  3. Run your scripts: python -m src.pipelines.ingest"
 
   notify:
     name: Notify Upload Status
     runs-on: ubuntu-latest
-    needs: [validate, upload-scripts]
+    needs: [validate, package-and-upload]
     if: always()
     
     steps:
     - name: Upload Status
       run: |
-        if [ "${{ needs.upload-scripts.result }}" == "success" ]; then
-          echo "✅ All scripts uploaded successfully to Azure Storage!"
+        if [ "${{ needs.package-and-upload.result }}" == "success" ]; then
+          echo "✅ Deployment package uploaded successfully to Azure Storage!"
           echo "🎯 Ready for use in Azure Data Factory pipelines"
           echo "📍 Storage Account: ${{ secrets.AZURE_STORAGE_ACCOUNT }}"
           echo "📍 Container: customer-insights-pipeline/"
-          echo "📁 Files are organized in folders by data source"
+          echo "📦 Package format: ZIP (no duplicate file issues)"
         else
-          echo "❌ Script upload failed!"
+          echo "❌ Package upload failed!"
           echo "📋 Check the logs above for details"
         fi
