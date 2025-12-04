@@ -57,6 +57,9 @@ class IngestionPipeline:
         Returns:
             Dictionary with processing statistics including date range
         """
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+
         if batch_size is None:
             batch_size = self.config.batch_size
         
@@ -113,20 +116,14 @@ class IngestionPipeline:
                 total_batches = (total_records + batch_size - 1) // batch_size
                 
                 logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch)} records)")
-                
-                try:
-                    # Generate embeddings
-                    embeddings_batch = self._process_embeddings_batch(batch)
-                    embeddings_created += len(embeddings_batch)
+
+                embeddings_batch = self._process_embeddings_batch(batch)
+                embeddings_created += len(embeddings_batch)
+
+                tags_batch = self._process_tags_batch(batch)
+                tags_created += len(tags_batch)
                     
-                    # Generate tags
-                    tags_batch = self._process_tags_batch(batch)
-                    tags_created += len(tags_batch)
-                    
-                except Exception as e:
-                    logger.error(f"Error processing batch {batch_num}: {str(e)}")
-                    errors += len(batch)
-            
+
             logger.info(
                 f"Ingestion complete: {embeddings_created} embeddings, "
                 f"{tags_created} tags, {errors} errors"

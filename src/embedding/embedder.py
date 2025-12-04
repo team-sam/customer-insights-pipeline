@@ -5,6 +5,8 @@ from src.config.settings import Settings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import logging
+import re
+
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,9 @@ class Embedder:
         Returns:
             List of embedding vectors in the same order as input texts
         """
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+
         if not texts:
             return []
         
@@ -82,6 +87,15 @@ class Embedder:
         """
         max_retries = 5
         base_delay = 1.0  # Start with 1 second delay
+
+        def preprocess(text: str) -> str:
+
+            text = text.lower()  # Lowercase
+
+            return text
+        
+
+        batch = [preprocess(text) for text in batch]
         
         for attempt in range(max_retries):
             try:
@@ -100,9 +114,17 @@ class Embedder:
                 logger.warning(f"Rate limit hit on embedding batch. Retrying in {delay}s... (attempt {attempt + 1}/{max_retries})")
                 time.sleep(delay)
             except Exception as e:
-                # For other errors, raise immediately
+                # For other errors, save the batch to a file and raise immediately
+                error_filename = "failed_embedding_batch.txt"
+                try:
+                    with open(error_filename, "a", encoding="utf-8") as f:
+                        for text in batch:
+                            f.write(text + "\n")
+                    logger.error(f"Saved failed batch to {error_filename}")
+                except Exception as file_error:
+                    logger.error(f"Failed to save batch to file: {file_error}")
                 raise
-    
+
     def embed_single(self, text: str) -> List[float]:
         """
         Generate embedding for a single text.

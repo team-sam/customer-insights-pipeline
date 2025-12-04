@@ -155,6 +155,9 @@ class CosmosClient:
         with self.conn.cursor() as cursor:
             cursor.execute(query, (feedback_ids,))
             return cursor.fetchall()
+        
+   
+
     
     def get_all_embeddings(
         self, 

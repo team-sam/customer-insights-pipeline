@@ -50,7 +50,10 @@ class SQLClient:
         query = """
             SELECT feedback_id, feedback_text, feedback_source, created_at, sku, category, rating, cluster_id
             FROM customer_insights.feedback
-            WHERE created_at is not NULL
+            WHERE created_at IS NOT NULL
+              AND feedback_text IS NOT NULL
+              AND LTRIM(RTRIM(feedback_text)) <> ''
+              AND feedback_text LIKE '%[A-Za-z0-9]%'
         """
 
         params = []
