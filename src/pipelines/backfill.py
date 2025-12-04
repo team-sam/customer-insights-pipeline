@@ -190,6 +190,10 @@ def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
+    # Suppress verbose HTTP request logging from httpx/httpcore
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    
     # Load configuration
     config = Settings()
     
