@@ -77,12 +77,18 @@ python -m src.pipelines.ingest
 python -m src.pipelines.ingest --days-back 7 --batch-size 50 --limit 1000
 ```
 
+**Embeddings only (skip LLM tagging):**
+```bash
+python -m src.pipelines.ingest --days-back 1 --embeddings-only
+```
+
 **Available options:**
 - `--days-back N`: Process feedback from the last N days
 - `--start-date YYYY-MM-DD`: Start date for processing (inclusive)
 - `--end-date YYYY-MM-DD`: End date for processing (inclusive)
 - `--batch-size N`: Number of records to process in each batch (default: from config)
 - `--limit N`: Maximum number of records to process
+- `--embeddings-only`: Only generate embeddings without LLM tagging
 
 ### Clustering Pipeline
 

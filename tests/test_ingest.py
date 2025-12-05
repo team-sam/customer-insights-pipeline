@@ -464,3 +464,113 @@ class TestIngestionPipeline:
         
         mock_tagger_instance.tag_batch.assert_called_once()
         mock_sql_instance.insert_tags.assert_called_once_with(result)
+    
+    @patch('src.pipelines.ingest.FeedbackTagger')
+    @patch('src.pipelines.ingest.Embedder')
+    @patch('src.pipelines.ingest.CosmosClient')
+    @patch('src.pipelines.ingest.SQLClient')
+    def test_embeddings_only_mode(
+        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_tagger,
+        mock_config, sample_feedback_records, sample_vectors
+    ):
+        """Test pipeline runs in embeddings-only mode without calling tagger."""
+        # Setup mocks
+        mock_sql_instance = mock_sql_client.return_value
+        mock_sql_instance.get_new_feedback.return_value = sample_feedback_records
+        
+        mock_cosmos_instance = mock_cosmos_client.return_value
+        
+        mock_embedder_instance = mock_embedder.return_value
+        mock_embedder_instance.embed_texts.return_value = sample_vectors
+        
+        # Run pipeline with embeddings_only=True
+        pipeline = IngestionPipeline(mock_config, embeddings_only=True)
+        stats = pipeline.run()
+        
+        # Verify FeedbackTagger was not instantiated
+        mock_tagger.assert_not_called()
+        assert pipeline.tagger is None
+        
+        # Verify embeddings were created
+        assert stats["total_records"] == 3
+        assert stats["embeddings_created"] == 3
+        assert stats["tags_created"] == 0
+        assert stats["errors"] == 0
+        
+        # Verify embedding generation was called
+        mock_embedder_instance.embed_texts.assert_called_once()
+        mock_cosmos_instance.insert_embeddings.assert_called_once()
+        
+        # Verify tagging was not called
+        mock_sql_instance.insert_tags.assert_not_called()
+    
+    @patch('src.pipelines.ingest.FeedbackTagger')
+    @patch('src.pipelines.ingest.Embedder')
+    @patch('src.pipelines.ingest.CosmosClient')
+    @patch('src.pipelines.ingest.SQLClient')
+    def test_embeddings_only_initialization(
+        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_tagger,
+        mock_config
+    ):
+        """Test pipeline initializes correctly with embeddings_only flag."""
+        # Test with embeddings_only=True
+        pipeline = IngestionPipeline(mock_config, embeddings_only=True)
+        assert pipeline.embeddings_only is True
+        assert pipeline.tagger is None
+        mock_tagger.assert_not_called()
+        
+        # Test with embeddings_only=False (default)
+        pipeline = IngestionPipeline(mock_config, embeddings_only=False)
+        assert pipeline.embeddings_only is False
+        mock_tagger.assert_called_once()
+    
+    @patch('src.pipelines.ingest.FeedbackTagger')
+    @patch('src.pipelines.ingest.Embedder')
+    @patch('src.pipelines.ingest.CosmosClient')
+    @patch('src.pipelines.ingest.SQLClient')
+    def test_embeddings_only_with_multiple_batches(
+        self, mock_sql_client, mock_cosmos_client, mock_embedder, mock_tagger,
+        mock_config
+    ):
+        """Test embeddings-only mode with multiple batches."""
+        # Create 5 feedback records (will be split into 2 batches with batch_size=3)
+        feedback_records = [
+            FeedbackRecord(
+                feedback_id=f"fb{i:03d}",
+                text=f"Feedback text {i}",
+                source="review",
+                created_at=datetime(2024, 1, i+1, tzinfo=timezone.utc)
+            )
+            for i in range(5)
+        ]
+        
+        # Setup mocks
+        mock_sql_instance = mock_sql_client.return_value
+        mock_sql_instance.get_new_feedback.return_value = feedback_records
+        
+        mock_cosmos_instance = mock_cosmos_client.return_value
+        
+        mock_embedder_instance = mock_embedder.return_value
+        # Return different vectors for each batch
+        mock_embedder_instance.embed_texts.side_effect = [
+            [[0.1] * 1536, [0.2] * 1536, [0.3] * 1536],  # Batch 1
+            [[0.4] * 1536, [0.5] * 1536]  # Batch 2
+        ]
+        
+        # Run pipeline with batch_size=3 and embeddings_only=True
+        pipeline = IngestionPipeline(mock_config, embeddings_only=True)
+        stats = pipeline.run(batch_size=3)
+        
+        # Verify
+        assert stats["total_records"] == 5
+        assert stats["embeddings_created"] == 5
+        assert stats["tags_created"] == 0
+        assert stats["errors"] == 0
+        
+        # Verify 2 batches were processed for embeddings
+        assert mock_embedder_instance.embed_texts.call_count == 2
+        assert mock_cosmos_instance.insert_embeddings.call_count == 2
+        
+        # Verify tagging was not called at all
+        mock_tagger.assert_not_called()
+        mock_sql_instance.insert_tags.assert_not_called()
