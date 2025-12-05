@@ -8,6 +8,7 @@ from psycopg2.extras import execute_values
 from typing import List, Tuple, Optional
 from src.config.settings import Settings
 from src.models.schemas import EmbeddingRecord
+from psycopg2.extensions import adapt
 
 
 class CosmosClient:
@@ -163,39 +164,47 @@ class CosmosClient:
         self, 
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        source_filter: Optional[str] = None
+        source_filter: Optional[str] = None,
+        print_query: bool = False
     ) -> List[Tuple[str, List[float], str]]:
         """
         Retrieve all embeddings, optionally filtered by date range and source.
-        
+
         Args:
             start_date: Optional start date filter
             end_date: Optional end date filter
             source_filter: Optional filter by source (review, return, chat)
-        
+            print_query: If True, print the SQL query and parameters
+
         Returns:
             List of (feedback_id, vector, source) tuples
         """
         if not self.conn:
             self.connect()
-        
+
         query = "SELECT feedback_id, vector, source FROM embeddings WHERE 1=1"
         params = []
-        
         if source_filter:
-            query += " AND source = %s"
-            params.append(source_filter)
-        
+            query += f" AND source = '{source_filter}'"
+
         if start_date and end_date:
-            query += " AND created_at BETWEEN %s AND %s"
-            params.extend([start_date, end_date])
+            query += f" AND created_at BETWEEN '{start_date}' AND '{end_date}'"
         elif start_date:
-            query += " AND created_at >= %s"
-            params.append(start_date)
+            query += f" AND created_at >= '{start_date}'"
         elif end_date:
-            query += " AND created_at <= %s"
-            params.append(end_date)
-        
-        with self.conn.cursor() as cursor:
-            cursor.execute(query, params)
-            return cursor.fetchall()
+            query += f" AND created_at <= '{end_date}'"
+
+        if print_query:
+            print("SQL Query:", query)
+            with self.conn.cursor() as cursor:
+                cursor.execute(query)
+                results = cursor.fetchall()
+                # Preserve data types from DB (e.g., vector as list of floats)
+                return [
+                (
+                    row[0],  # feedback_id (str)
+                    list(row[1]) if row[1] is not None else None,  # vector (list of floats)
+                    row[2]   # source (str)
+                )
+                for row in results
+                ]

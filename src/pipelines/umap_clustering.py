@@ -346,8 +346,7 @@ class RecursiveClusteringPipeline:
         self,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
-        days_back: Optional[int] = None,
-        limit: Optional[int] = None,
+
     ) -> Dict[str, Any]:
         """
         Execute the UMAP + HDBSCAN clustering pipeline with recursive zooming.
@@ -361,22 +360,28 @@ class RecursiveClusteringPipeline:
         Returns:
             Dictionary of clustering stats/results.
         """
-        if days_back is not None:
-            end_date = datetime.now(timezone.utc)
-            start_date = end_date - timedelta(days=days_back)
-            logger.info(f"Using look-back window: last {days_back} days")
 
         logger.info(f"Clustering with UMAP + HDBSCAN (recursive depth: {self.recursive_depth})")
 
         # Fetch feedback data
         self.sql_client.connect()
         self.cosmos_client.connect()
+
+        logger.info(f"Start date: {start_date}, End date: {end_date}")
         feedback_records = self.cosmos_client.get_all_embeddings(
             start_date=start_date,
             end_date=end_date,
-            limit=limit,
+            print_query=self.local_mode
+            
         )
 
+        # Print preview of feedback records
+    
+        if feedback_records:
+            first_entry = feedback_records[0]
+            print("First entry types:", tuple(type(x) for x in first_entry))
+
+    
         logger.info(f"Fetched {len(feedback_records)} feedback records for clustering")
 
         if not feedback_records:
@@ -390,15 +395,14 @@ class RecursiveClusteringPipeline:
             }
 
         # Convert to DataFrame
-        df = pd.DataFrame([f.__dict__ for f in feedback_records])
 
-        # Extract embeddings
-        if 'embedding' in df.columns:
-            embeddings = np.array(df['embedding'].tolist())
-        elif 'vector' in df.columns:
-            embeddings = np.array(df['vector'].tolist())
-        else:
-            raise ValueError("No 'embedding' or 'vector' column found in feedback data")
+        df = pd.DataFrame(feedback_records)
+        
+        df =df.rename(columns={0: 'feedback_id', 1: 'vector', 2: 'source'})
+        print(df.head() )
+    
+        # Ensure vectors are lists of numbers
+        embeddings = np.array([np.array(vec, dtype=np.float32) for vec in df['vector']])
 
         logger.info(f"Embeddings shape: {embeddings.shape}")
 
@@ -461,8 +465,16 @@ class RecursiveClusteringPipeline:
 
 
 def main():
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler()  # Print to console
+        ]
+    )
     parser = argparse.ArgumentParser(description="Run UMAP + HDBSCAN recursive clustering pipeline.")
-    parser.add_argument("--lookback", type=int, help="Number of days to look back.")
+
     parser.add_argument("--start-date", type=str, help="Start date (YYYY-MM-DD).")
     parser.add_argument("--end-date", type=str, help="End date (YYYY-MM-DD).")
     parser.add_argument("--limit", type=int, default=None, help="Max records to cluster.")
@@ -510,11 +522,10 @@ def main():
     result = pipeline.run(
         start_date=start_date,
         end_date=end_date,
-        days_back=args.lookback,
-        limit=args.limit,
+        
     )
     
-    if not args.local:
+    if args.local:
         print(f"\nClustering Results:")
         print(f"Total records: {result['total_records']}")
         print(f"Clusters found: {result['n_clusters']}")

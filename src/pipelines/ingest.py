@@ -172,7 +172,7 @@ class IngestionPipeline:
                 vector=vector,
                 source=feedback.source,
                 model=self.config.openai_embedding_model,
-                created_at=datetime.now(timezone.utc)
+                created_at=feedback.created_at
             )
             embedding_records.append(embedding_record)
         
@@ -207,7 +207,7 @@ class IngestionPipeline:
                     feedback_id=feedback.feedback_id,
                     tag_name=tag_name,
                     confidence_score=1.0,  # LLM doesn't provide confidence scores
-                    created_at=datetime.now(timezone.utc)
+                    created_at=feedback.created_at
                 )
                 tag_records.append(tag_record)
         
