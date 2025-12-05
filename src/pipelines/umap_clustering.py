@@ -467,7 +467,7 @@ def main():
     parser.add_argument("--end-date", type=str, help="End date (YYYY-MM-DD).")
     parser.add_argument("--limit", type=int, default=None, help="Max records to cluster.")
     parser.add_argument("--recursive-depth", type=int, default=1, help="How many levels to recurse (1 = no recursion).")
-    parser.add_argument("--min-cluster-size", type=int, default=500, help="Minimum cluster size for HDBSCAN.")
+    parser.add_argument("--min-cluster-size", type=int, default=50, help="Minimum cluster size for HDBSCAN.")
     parser.add_argument("--min-cluster-pct", type=float, default=0.01, help="Min cluster size as percentage of data.")
     parser.add_argument("--n-neighbors", type=int, default=15, help="UMAP n_neighbors parameter.")
     parser.add_argument("--n-components", type=int, default=2, help="UMAP n_components (dimensions).")
