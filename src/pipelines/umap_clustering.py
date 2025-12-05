@@ -379,6 +379,7 @@ class RecursiveClusteringPipeline:
     
         if feedback_records:
             first_entry = feedback_records[0]
+            print("First entry preview:", first_entry)
             print("First entry types:", tuple(type(x) for x in first_entry))
 
     
@@ -402,10 +403,21 @@ class RecursiveClusteringPipeline:
         print(df.head() )
     
         # Ensure vectors are lists of numbers
-        embeddings = np.array([np.array(vec, dtype=np.float32) for vec in df['vector']])
+        # Convert string representations of lists to actual lists
+        import ast
+   
+        # Convert 'vector' column (list of lists) to a 2D numpy array
+        embeddings_list = []
+        
+        for vec in df['vector']:
 
+            float_vec = np.array(ast.literal_eval(vec))            
+            embeddings_list.append(float_vec)
+            
+
+        embeddings = np.array(embeddings_list)
+        
         logger.info(f"Embeddings shape: {embeddings.shape}")
-
         # Normalize embeddings
         scaler = StandardScaler()
         embeddings = scaler.fit_transform(embeddings)

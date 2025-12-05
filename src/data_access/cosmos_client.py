@@ -203,7 +203,7 @@ class CosmosClient:
                 return [
                 (
                     row[0],  # feedback_id (str)
-                    list(row[1]) if row[1] is not None else None,  # vector (list of floats)
+                    row[1],
                     row[2]   # source (str)
                 )
                 for row in results
