@@ -212,8 +212,7 @@ class ChatAgent:
         
         return "Uncategorized"
 
-    def tag_feedback_batch(self, feedback_texts: List[str], categories: List[str], 
-                          allow_multiple: bool = True) -> List[List[str]]:
+    def tag_feedback_batch(self, feedback_texts: List[str], categories: List[str], allow_multiple: bool = True) -> List[List[str]]:
         """
         Tag multiple pieces of feedback in a single API call (more efficient).
         
@@ -378,8 +377,7 @@ class FeedbackTagger:
         """
         return self.agent.tag_feedback(feedback_text, self.categories, allow_multiple)
     
-    def tag_batch(self, feedback_texts: List[str], allow_multiple: bool = True, 
-                  batch_size: int = 10) -> List[List[str]]:
+    def tag_batch(self, feedback_texts: List[str], allow_multiple: bool = True, batch_size: int = 10) -> List[List[str]]:
         """
         Tag multiple pieces of feedback efficiently using multithreading.
         
@@ -431,8 +429,7 @@ class FeedbackTagger:
         return all_results
     
     
-    def get_category_distribution(self, feedback_texts: List[str], 
-                                 allow_multiple: bool = True) -> Dict[str, int]:
+    def get_category_distribution(self, feedback_texts: List[str], allow_multiple: bool = True) -> Dict[str, int]:
         """
         Get distribution of categories across multiple feedback items.
         

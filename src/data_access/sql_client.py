@@ -25,13 +25,7 @@ class SQLClient:
         if self.conn:
             self.conn.close()
 
-    def get_new_feedback(
-        self, 
-        last_processed_date: Optional[datetime] = None,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
-        limit: Optional[int] = None
-    ) -> List[FeedbackRecord]:
+    def get_new_feedback(self, last_processed_date: Optional[datetime] = None, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None, limit: Optional[int] = None) -> List[FeedbackRecord]:
         """
         Retrieve new feedback records for processing.
         
