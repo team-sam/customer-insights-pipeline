@@ -91,13 +91,7 @@ class CosmosClient:
             execute_values(cursor, query, values)
             self.conn.commit()
     
-    def search_similar(
-        self, 
-        query_vector: List[float], 
-        limit: int = 10,
-        distance_threshold: Optional[float] = None,
-        source_filter: Optional[str] = None
-    ) -> List[Tuple[str, float]]:
+    def search_similar(self, query_vector: List[float], limit: int = 10, distance_threshold: Optional[float] = None, source_filter: Optional[str] = None) -> List[Tuple[str, float]]:
         """
         Find similar vectors using cosine distance.
         
@@ -161,13 +155,7 @@ class CosmosClient:
    
 
     
-    def get_all_embeddings(
-        self, 
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        source_filter: Optional[str] = None,
-        print_query: bool = False
-    ) -> List[Tuple[str, List[float], str]]:
+    def get_all_embeddings(self, start_date: Optional[str] = None, end_date: Optional[str] = None, source_filter: Optional[str] = None, print_query: bool = False) -> List[Tuple[str, List[float], str]]:
         """
         Retrieve all embeddings, optionally filtered by date range and source.
 

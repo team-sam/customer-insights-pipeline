@@ -29,16 +29,7 @@ class RecursiveClusteringPipeline:
     Implements the approach from the article for customer segmentation.
     """
 
-    def __init__(
-        self, 
-        config: Settings,
-        umap_params: Optional[Dict[str, Any]] = None,
-        hdbscan_params: Optional[Dict[str, Any]] = None,
-        recursive_depth: int = 1,
-        min_cluster_size_pct: float = 0.01,
-        local_mode: bool = False,
-        output_dir: str = "./cluster_output"
-    ):
+    def __init__(self, config: Settings, umap_params: Optional[Dict[str, Any]] = None, hdbscan_params: Optional[Dict[str, Any]] = None, recursive_depth: int = 1, min_cluster_size_pct: float = 0.01, local_mode: bool = False, output_dir: str = "./cluster_output"):
         self.config = config
         self.sql_client = SQLClient(config)
         self.cosmos_client = CosmosClient(config)
@@ -98,14 +89,7 @@ class RecursiveClusteringPipeline:
         clusterer = hdbscan.HDBSCAN(**params)
         return clusterer.fit_predict(reduced_data)
 
-    def _visualize_clusters(
-        self,
-        reduced_data: np.ndarray,
-        labels: np.ndarray,
-        parent_label: str,
-        depth: int,
-        df_subset: pd.DataFrame = None
-    ):
+    def _visualize_clusters(self, reduced_data: np.ndarray, labels: np.ndarray, parent_label: str, depth: int, df_subset: pd.DataFrame = None):
         """Create visualizations for clusters (local mode only)."""
         if not self.local_mode:
             return
@@ -245,14 +229,7 @@ class RecursiveClusteringPipeline:
         print("\n" + report_text)
         logger.info(f"Saved summary report: {filename}")
 
-    def _recursive_cluster(
-        self,
-        embeddings: np.ndarray,
-        indices: np.ndarray,
-        parent_label: str = "root",
-        current_depth: int = 0,
-        df: pd.DataFrame = None
-    ) -> Dict[int, str]:
+    def _recursive_cluster(self, embeddings: np.ndarray, indices: np.ndarray, parent_label: str = "root", current_depth: int = 0, df: pd.DataFrame = None) -> Dict[int, str]:
         """
         Recursively cluster data by zooming into each cluster.
         
@@ -339,12 +316,7 @@ class RecursiveClusteringPipeline:
         
         return cluster_mapping
 
-    def run(
-        self,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
-
-    ) -> Dict[str, Any]:
+    def run(self, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> Dict[str, Any]:
         """
         Execute the UMAP + HDBSCAN clustering pipeline with recursive zooming.
 

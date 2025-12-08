@@ -38,14 +38,7 @@ class IngestionPipeline:
         self.embedder = Embedder(config)
         self.tagger = None if embeddings_only else FeedbackTagger(config, custom_categories=categories)
     
-    def run(
-        self,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
-        days_back: Optional[int] = None,
-        batch_size: Optional[int] = None,
-        limit: Optional[int] = None
-    ) -> dict:
+    def run(self, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None, days_back: Optional[int] = None, batch_size: Optional[int] = None, limit: Optional[int] = None) -> dict:
         """
         Execute the ingestion pipeline.
         
