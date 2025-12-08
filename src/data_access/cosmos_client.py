@@ -72,12 +72,13 @@ class CosmosClient:
             self.connect()
         
         values = [
-            (r.feedback_id, r.vector, r.model, r.source, r.created_at)
+            (r.feedback_id, r.vector, r.model, r.source, r.created_at, r.feedback_text)
             for r in records
         ]
         
+        
         query = """
-            INSERT INTO embeddings (feedback_id, vector, model, source, created_at,feedback_text)
+            INSERT INTO embeddings (feedback_id, vector, model, source, created_at, feedback_text)
             VALUES %s
             ON CONFLICT (feedback_id) DO UPDATE 
             SET vector = EXCLUDED.vector, 
