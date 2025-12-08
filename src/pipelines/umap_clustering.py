@@ -191,10 +191,7 @@ class RecursiveClusteringPipeline:
         if 'feedback_id' in df_subset.columns:
             detail_filename = f"{self.output_dir}/cluster_assignments_{safe_label}_depth{depth}.csv"
             export_cols = ['feedback_id', 'cluster_label']
-            if 'feedback_text' in df_subset.columns:
-                export_cols.append('feedback_text')
-            elif 'text' in df_subset.columns:
-                export_cols.append('text')
+
             
             df_subset[export_cols].to_csv(detail_filename, index=False)
             logger.info(f"Saved cluster assignments: {detail_filename}")
@@ -408,7 +405,7 @@ class RecursiveClusteringPipeline:
    
         # Convert 'vector' column (list of lists) to a 2D numpy array
         embeddings_list = []
-        
+
         for vec in df['vector']:
 
             float_vec = np.array(ast.literal_eval(vec))            
@@ -491,7 +488,7 @@ def main():
     parser.add_argument("--end-date", type=str, help="End date (YYYY-MM-DD).")
     parser.add_argument("--limit", type=int, default=None, help="Max records to cluster.")
     parser.add_argument("--recursive-depth", type=int, default=1, help="How many levels to recurse (1 = no recursion).")
-    parser.add_argument("--min-cluster-size", type=int, default=50, help="Minimum cluster size for HDBSCAN.")
+    parser.add_argument("--min-cluster-size", type=int, default=10, help="Minimum cluster size for HDBSCAN.")
     parser.add_argument("--min-cluster-pct", type=float, default=0.01, help="Min cluster size as percentage of data.")
     parser.add_argument("--n-neighbors", type=int, default=15, help="UMAP n_neighbors parameter.")
     parser.add_argument("--n-components", type=int, default=2, help="UMAP n_components (dimensions).")

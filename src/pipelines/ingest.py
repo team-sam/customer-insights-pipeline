@@ -172,7 +172,8 @@ class IngestionPipeline:
                 vector=vector,
                 source=feedback.source,
                 model=self.config.openai_embedding_model,
-                created_at=feedback.created_at
+                created_at=feedback.created_at,
+                feedback_text=feedback.text
             )
             embedding_records.append(embedding_record)
         

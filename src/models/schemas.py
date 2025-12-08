@@ -26,6 +26,7 @@ class EmbeddingRecord(BaseModel):
     source: str
     model: str
     created_at: datetime
+    feedback_text: str
 
 
 class ClusterRecord(BaseModel):

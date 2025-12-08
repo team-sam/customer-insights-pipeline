@@ -77,13 +77,14 @@ class CosmosClient:
         ]
         
         query = """
-            INSERT INTO embeddings (feedback_id, vector, model, source, created_at)
+            INSERT INTO embeddings (feedback_id, vector, model, source, created_at,feedback_text)
             VALUES %s
             ON CONFLICT (feedback_id) DO UPDATE 
             SET vector = EXCLUDED.vector, 
                 model = EXCLUDED.model,
                 source = EXCLUDED.source,
-                created_at = EXCLUDED.created_at
+                created_at = EXCLUDED.created_at,
+                feedback_text = EXCLUDED.feedback_text
         """
         
         with self.conn.cursor() as cursor:
@@ -142,13 +143,13 @@ class CosmosClient:
             feedback_ids: List of feedback IDs
         
         Returns:
-            List of (feedback_id, vector, source) tuples
+            List of (feedback_id, vector, source, feedback_text) tuples
         """
         if not self.conn:
             self.connect()
         
         query = """
-            SELECT feedback_id, vector, source
+            SELECT feedback_id, vector, source, feedback_text
             FROM embeddings
             WHERE feedback_id = ANY(%s)
         """
@@ -177,12 +178,12 @@ class CosmosClient:
             print_query: If True, print the SQL query and parameters
 
         Returns:
-            List of (feedback_id, vector, source) tuples
+            List of (feedback_id, vector, source, feedback_text) tuples
         """
         if not self.conn:
             self.connect()
 
-        query = "SELECT feedback_id, vector, source FROM embeddings WHERE 1=1"
+        query = "SELECT feedback_id, vector, source, feedback_text FROM embeddings WHERE 1=1"
         params = []
         if source_filter:
             query += f" AND source = '{source_filter}'"
