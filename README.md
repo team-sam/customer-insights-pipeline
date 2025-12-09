@@ -183,6 +183,5 @@ For setup instructions, see [AZURE_DEPLOYMENT.md](AZURE_DEPLOYMENT.md).
 
 ## Test Coverage
 
-Current test coverage: 43%
-- 37 tests passing
-- Core components (schemas, embedder, llm_agent, clusterer) all tested
+- Core components tested: schemas, embedder, llm_agent, ingestion pipeline
+- Tests include multithreading and rate limit retry scenarios
