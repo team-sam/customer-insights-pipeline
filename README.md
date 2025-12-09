@@ -7,9 +7,7 @@ A Python-based data pipeline for processing customer feedback using embeddings, 
 - **Flexible Ingestion**: Process feedback over any date range with daily, custom, or full backfill options
 - **Embedding Generation**: Generate embeddings for customer feedback using OpenAI's text-embedding models
 - **Vector Storage**: Store embeddings in PostgreSQL with pgvector extension
-- **Advanced Clustering**: 
-  - Traditional algorithms (KMeans, DBSCAN, Agglomerative)
-  - **UMAP + HDBSCAN with Recursive Clustering**: Discover hierarchical customer segments by "zooming in" on clusters
+- **Advanced Clustering**: **UMAP + HDBSCAN with Recursive Clustering** - Discover hierarchical customer segments by "zooming in" on clusters
 - **Tagging**: Automatically tag feedback with predefined categories using LLM
 - **SQL Integration**: Read feedback from SQL Server and store results
 - **Azure Integration**: Automated deployment to Azure Blob Storage for Azure Batch execution via Azure Data Factory
@@ -92,22 +90,7 @@ python -m src.pipelines.ingest --days-back 1 --embeddings-only
 
 ### Clustering Pipeline
 
-#### Traditional Clustering
-
-Basic clustering with KMeans, DBSCAN, or Agglomerative algorithms:
-```bash
-python -m src.pipelines.clustering --algorithm kmeans --lookback 30
-```
-
-**Available options:**
-- `--algorithm`: Choose from `kmeans`, `dbscan`, `agglomerative`
-- `--lookback N`: Process feedback from the last N days
-- `--start-date YYYY-MM-DD`: Start date for clustering
-- `--end-date YYYY-MM-DD`: End date for clustering
-- `--limit N`: Maximum number of records to cluster
-- `--algo-param key=value`: Pass algorithm-specific parameters (e.g., `--algo-param n_clusters=5`)
-
-#### Advanced Clustering: UMAP + HDBSCAN with Recursive Clustering
+#### UMAP + HDBSCAN with Recursive Clustering
 
 This approach implements the methodology described in [this article](https://link-to-article.com) for discovering hierarchical customer segments through dimensionality reduction and density-based clustering.
 
@@ -118,21 +101,20 @@ This approach implements the methodology described in [this article](https://lin
 
 **Production deployment (Azure Data Factory):**
 ```bash
-python -m src.pipelines.recursive_clustering --lookback 30 --recursive-depth 2
+python -m src.pipelines.umap_clustering --start-date 2024-01-01 --end-date 2024-01-31 --recursive-depth 2
 ```
 
 **Local development with visualizations and analysis:**
 ```bash
-python -m src.pipelines.recursive_clustering --lookback 30 --local --recursive-depth 2 --limit 5000
+python -m src.pipelines.umap_clustering --start-date 2024-01-01 --end-date 2024-01-31 --local --recursive-depth 2 --limit 5000
 ```
 
 **Available options:**
-- `--lookback N`: Process feedback from the last N days
 - `--start-date YYYY-MM-DD`: Start date for clustering
 - `--end-date YYYY-MM-DD`: End date for clustering
 - `--limit N`: Maximum number of records to cluster
 - `--recursive-depth N`: How many levels to recurse (1 = no recursion, 2-3 recommended)
-- `--min-cluster-size N`: Minimum points for HDBSCAN cluster (default: 500)
+- `--min-cluster-size N`: Minimum points for HDBSCAN cluster (default: 100)
 - `--min-cluster-pct`: Minimum cluster size as percentage of data (default: 0.01)
 - `--n-neighbors N`: UMAP n_neighbors parameter (default: 15)
 - `--n-components N`: UMAP dimensionality (default: 2, use 2-3 for visualization)
@@ -152,8 +134,9 @@ When `--local` is enabled, the pipeline generates:
 **Example workflow:**
 ```bash
 # Step 1: Local analysis - explore clustering structure
-python -m src.pipelines.recursive_clustering \
-  --lookback 90 \
+python -m src.pipelines.umap_clustering \
+  --start-date 2024-01-01 \
+  --end-date 2024-03-31 \
   --local \
   --recursive-depth 2 \
   --min-cluster-size 200 \
@@ -165,8 +148,9 @@ python -m src.pipelines.recursive_clustering \
 # - Review summary_report.txt for overall statistics
 
 # Step 3: Production run - save results to database
-python -m src.pipelines.recursive_clustering \
-  --lookback 90 \
+python -m src.pipelines.umap_clustering \
+  --start-date 2024-01-01 \
+  --end-date 2024-03-31 \
   --recursive-depth 2 \
   --min-cluster-size 200
 ```
@@ -199,6 +183,5 @@ For setup instructions, see [AZURE_DEPLOYMENT.md](AZURE_DEPLOYMENT.md).
 
 ## Test Coverage
 
-Current test coverage: 43%
-- 37 tests passing
-- Core components (schemas, embedder, llm_agent, clusterer) all tested
+- Core components tested: schemas, embedder, llm_agent, ingestion pipeline
+- Tests include multithreading and rate limit retry scenarios
