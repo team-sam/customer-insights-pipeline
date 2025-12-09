@@ -73,21 +73,74 @@ class RecursiveClusteringPipeline:
                 logger.warning("matplotlib/seaborn not installed. Install with: pip install matplotlib seaborn")
                 self.local_mode = False
 
+
+    def _evaluate_umap_quality(self, original_embeddings: np.ndarray, reduced_embeddings: np.ndarray, n_neighbors: int = 15) -> Dict[str, float]:
+
+        from sklearn.manifold import trustworthiness
+        
+        trust = trustworthiness(original_embeddings, reduced_embeddings, n_neighbors=n_neighbors)
+        
+        return {
+            'trustworthiness': float(trust)
+        }
+
+    def _evaluate_clustering_quality(
+        self, 
+        original_embeddings: np.ndarray,
+        reduced_data: np.ndarray, 
+        labels: np.ndarray,
+        clusterer: hdbscan.HDBSCAN
+    ) -> Dict[str, float]:
+        """
+        Evaluate clustering quality with metrics appropriate for UMAP + HDBSCAN.
+        """
+        metrics = {}
+        
+        # HDBSCAN Native Metrics (best for density-based clustering)
+        metrics['relative_validity'] = float(clusterer.relative_validity_) if hasattr(clusterer, 'relative_validity_') else None
+        
+        # Cluster persistence (how stable/strong are the clusters?)
+        if hasattr(clusterer, 'cluster_persistence_'):
+            metrics['min_persistence'] = float(clusterer.cluster_persistence_.min())
+            metrics['mean_persistence'] = float(clusterer.cluster_persistence_.mean())
+        
+        # Membership probabilities (how confident is HDBSCAN about assignments?)
+        if hasattr(clusterer, 'probabilities_'):
+            metrics['mean_probability'] = float(clusterer.probabilities_.mean())
+            metrics['low_confidence_ratio'] = float((clusterer.probabilities_ < 0.5).sum() / len(clusterer.probabilities_))
+        
+        # Basic cluster statistics
+        mask = labels != -1
+        metrics['n_clusters'] = len(np.unique(labels[mask])) if mask.sum() > 0 else 0
+        metrics['noise_ratio'] = float((labels == -1).sum() / len(labels))
+        
+        # Cluster size distribution
+        if metrics['n_clusters'] > 0:
+            cluster_sizes = pd.Series(labels[mask]).value_counts()
+            metrics['largest_cluster_ratio'] = float(cluster_sizes.max() / mask.sum())
+            metrics['smallest_cluster_size'] = int(cluster_sizes.min())
+            metrics['mean_cluster_size'] = float(cluster_sizes.mean())
+            metrics['cluster_size_std'] = float(cluster_sizes.std())
+        
+        return metrics
+
     def _apply_umap(self, embeddings: np.ndarray) -> np.ndarray:
         """Apply UMAP dimensionality reduction."""
         logger.info(f"Applying UMAP with params: {self.umap_params}")
         reducer = umap.UMAP(**self.umap_params)
         return reducer.fit_transform(embeddings)
 
-    def _apply_hdbscan(self, reduced_data: np.ndarray, min_cluster_size: Optional[int] = None) -> np.ndarray:
-        """Apply HDBSCAN clustering."""
+    def _apply_hdbscan(self, reduced_data: np.ndarray, min_cluster_size: Optional[int] = None) -> Tuple[np.ndarray, hdbscan.HDBSCAN]:
+        """Apply HDBSCAN clustering and return labels + clusterer object."""
         params = self.hdbscan_params.copy()
         if min_cluster_size:
             params['min_cluster_size'] = min_cluster_size
             
         logger.info(f"Applying HDBSCAN with params: {params}")
         clusterer = hdbscan.HDBSCAN(**params)
-        return clusterer.fit_predict(reduced_data)
+        labels = clusterer.fit_predict(reduced_data)
+        
+        return labels, clusterer
 
     def _visualize_clusters(self, reduced_data: np.ndarray, labels: np.ndarray, parent_label: str, depth: int, df_subset: pd.DataFrame = None):
         """Create visualizations for clusters (local mode only)."""
@@ -95,11 +148,9 @@ class RecursiveClusteringPipeline:
             return
             
         n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-        
-        # Create figure with subplots
+
         fig, axes = self.plt.subplots(1, 2, figsize=(16, 6))
-        
-        # Plot 1: Cluster scatter plot
+
         scatter = axes[0].scatter(
             reduced_data[:, 0],
             reduced_data[:, 1],
@@ -108,6 +159,7 @@ class RecursiveClusteringPipeline:
             alpha=0.6,
             s=20
         )
+
         axes[0].set_title(f'Clusters at {parent_label} (Depth {depth})\n{n_clusters} clusters found')
         axes[0].set_xlabel('UMAP Component 1')
         axes[0].set_ylabel('UMAP Component 2')
@@ -154,8 +206,6 @@ class RecursiveClusteringPipeline:
             sample_texts = []
             if 'feedback_text' in cluster_df.columns:
                 sample_texts = cluster_df['feedback_text'].head(10).tolist()
-            elif 'text' in cluster_df.columns:
-                sample_texts = cluster_df['text'].head(10).tolist()
             
             analysis.append({
                 'cluster_label': cluster_id,
@@ -175,12 +225,15 @@ class RecursiveClusteringPipeline:
         if 'feedback_id' in df_subset.columns:
             detail_filename = f"{self.output_dir}/cluster_assignments_{safe_label}_depth{depth}.csv"
             export_cols = ['feedback_id', 'cluster_label']
-
+            if 'feedback_text' in df_subset.columns:
+                export_cols.append('feedback_text')
             
             df_subset[export_cols].to_csv(detail_filename, index=False)
             logger.info(f"Saved cluster assignments: {detail_filename}")
         
         logger.info(f"Saved cluster analysis: {filename}")
+
+
 
     def _generate_summary_report(self, df: pd.DataFrame):
         """Generate overall summary report (local mode only)."""
@@ -194,11 +247,33 @@ class RecursiveClusteringPipeline:
         report.append(f"\nTotal Reviews Analyzed: {len(df)}")
         report.append(f"Total Unique Clusters: {df['cluster_label'].nunique()}")
         report.append(f"Recursive Depth: {self.recursive_depth}")
+        
+        report.append(f"\n" + "-" * 80)
+        report.append("QUALITY METRICS BY DEPTH")
+        report.append("-" * 80)
+    
+        for label, metrics in self.cluster_hierarchy.items():
+            if 'cluster_quality' in metrics:
+                cq = metrics['cluster_quality']
+                um = metrics.get('umap_metrics', {})
+                report.append(f"\n{label} (Depth {metrics['depth']}):")
+                report.append(f"  Points: {metrics['n_points']}")
+                report.append(f"  Clusters: {metrics['n_clusters']}")
+                if um.get('trustworthiness') is not None:
+                    report.append(f"  UMAP Trustworthiness: {um['trustworthiness']:.3f}")
+                if cq.get('relative_validity') is not None:
+                    report.append(f"  Relative Validity: {cq['relative_validity']:.3f}")
+                if cq.get('mean_persistence') is not None:
+                    report.append(f"  Mean Persistence: {cq['mean_persistence']:.3f}")
+                if cq.get('mean_probability') is not None:
+                    report.append(f"  Mean Probability: {cq['mean_probability']:.3f}")
+                report.append(f"  Noise Ratio: {cq['noise_ratio']:.1%}")
+        
+        # Breakdown by depth
         report.append(f"\n" + "-" * 80)
         report.append("CLUSTER BREAKDOWN BY DEPTH")
         report.append("-" * 80)
         
-        # Breakdown by depth
         depth_stats = df.groupby('cluster_depth').agg({
             'cluster_label': 'nunique',
             'feedback_id': 'count'
@@ -229,44 +304,48 @@ class RecursiveClusteringPipeline:
         print("\n" + report_text)
         logger.info(f"Saved summary report: {filename}")
 
+
+
     def _recursive_cluster(self, embeddings: np.ndarray, indices: np.ndarray, parent_label: str = "root", current_depth: int = 0, df: pd.DataFrame = None) -> Dict[int, str]:
-        """
-        Recursively cluster data by zooming into each cluster.
-        
-        Args:
-            embeddings: Original high-dimensional embeddings
-            indices: Indices of data points to cluster
-            parent_label: Label of parent cluster
-            current_depth: Current recursion depth
-            df: DataFrame with original data (for visualization)
-            
-        Returns:
-            Dictionary mapping original indices to hierarchical cluster labels
-        """
+
         if current_depth >= self.recursive_depth or len(indices) < self.hdbscan_params['min_cluster_size']:
             return {idx: parent_label for idx in indices}
         
         logger.info(f"Clustering {len(indices)} points at depth {current_depth} (parent: {parent_label})")
         
-        # Get embeddings for this subset
         subset_embeddings = embeddings[indices]
         
-        # Apply UMAP
         reduced_data = self._apply_umap(subset_embeddings)
-        
+     
+        if self.local_mode:
+            umap_metrics = self._evaluate_umap_quality(subset_embeddings, reduced_data)
+            logger.info(f"UMAP trustworthiness at depth {current_depth}: {umap_metrics['trustworthiness']:.3f}")
+
         # Apply HDBSCAN with dynamic min_cluster_size based on subset size
         min_size = max(
             self.hdbscan_params['min_cluster_size'],
             int(len(indices) * self.min_cluster_size_pct)
         )
-        labels = self._apply_hdbscan(reduced_data, min_cluster_size=min_size)
+
+        labels, clusterer = self._apply_hdbscan(reduced_data, min_cluster_size=min_size)
         
-        # Store cluster info
         n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
         logger.info(f"Found {n_clusters} clusters at depth {current_depth}")
         
-        # Visualize if in local mode
-        if self.local_mode and df is not None:
+        # Evaluate clustering quality and store metrics
+        if self.local_mode:
+            cluster_metrics = self._evaluate_clustering_quality(subset_embeddings, reduced_data, labels, clusterer)
+            logger.info(f"Clustering metrics at depth {current_depth}:")
+            
+            self.cluster_hierarchy[parent_label] = {
+                'n_points': len(indices),
+                'n_clusters': cluster_metrics['n_clusters'],
+                'depth': current_depth,
+                'umap_metrics': umap_metrics,
+                'cluster_quality': cluster_metrics
+            }
+
+            # Visualize
             df_subset = df.iloc[indices].copy()
             temp_labels = labels.copy()
             df_subset['temp_cluster'] = temp_labels
@@ -301,13 +380,6 @@ class RecursiveClusteringPipeline:
                 else:
                     cluster_mapping.update({idx: hierarchical_label for idx in cluster_indices})
         
-        # Store in hierarchy
-        self.cluster_hierarchy[parent_label] = {
-            'n_points': len(indices),
-            'n_clusters': n_clusters,
-            'depth': current_depth
-        }
-        
         # Analyze cluster content if in local mode
         if self.local_mode and df is not None:
             df_subset = df.iloc[indices].copy()
@@ -316,18 +388,11 @@ class RecursiveClusteringPipeline:
         
         return cluster_mapping
 
+
+
     def run(self, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> Dict[str, Any]:
         """
         Execute the UMAP + HDBSCAN clustering pipeline with recursive zooming.
-
-        Args:
-            start_date: Filter feedback on or after this date (inclusive).
-            end_date: Filter feedback on or before this date (inclusive).
-            days_back: Look-back window in days from now.
-            limit: Max records to process.
-
-        Returns:
-            Dictionary of clustering stats/results.
         """
 
         logger.info(f"Clustering with UMAP + HDBSCAN (recursive depth: {self.recursive_depth})")
@@ -344,14 +409,6 @@ class RecursiveClusteringPipeline:
             
         )
 
-        # Print preview of feedback records
-    
-        if feedback_records:
-            first_entry = feedback_records[0]
-            print("First entry preview:", first_entry)
-            print("First entry types:", tuple(type(x) for x in first_entry))
-
-    
         logger.info(f"Fetched {len(feedback_records)} feedback records for clustering")
 
         if not feedback_records:
@@ -367,9 +424,10 @@ class RecursiveClusteringPipeline:
         # Convert to DataFrame
 
         df = pd.DataFrame(feedback_records)
+        df = df.rename(columns={0: 'feedback_id', 1: 'vector', 2: 'source'})
         
-        df =df.rename(columns={0: 'feedback_id', 1: 'vector', 2: 'source'})
-        print(df.head() )
+        if self.local_mode:
+            print(df.head())
     
         # Ensure vectors are lists of numbers
         # Convert string representations of lists to actual lists
@@ -460,7 +518,7 @@ def main():
     parser.add_argument("--end-date", type=str, help="End date (YYYY-MM-DD).")
     parser.add_argument("--limit", type=int, default=None, help="Max records to cluster.")
     parser.add_argument("--recursive-depth", type=int, default=1, help="How many levels to recurse (1 = no recursion).")
-    parser.add_argument("--min-cluster-size", type=int, default=10, help="Minimum cluster size for HDBSCAN.")
+    parser.add_argument("--min-cluster-size", type=int, default=100, help="Minimum cluster size for HDBSCAN.")
     parser.add_argument("--min-cluster-pct", type=float, default=0.01, help="Min cluster size as percentage of data.")
     parser.add_argument("--n-neighbors", type=int, default=15, help="UMAP n_neighbors parameter.")
     parser.add_argument("--n-components", type=int, default=2, help="UMAP n_components (dimensions).")
