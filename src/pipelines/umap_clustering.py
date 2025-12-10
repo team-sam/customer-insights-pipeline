@@ -8,12 +8,15 @@ from datetime import datetime, timedelta, timezone
 import logging
 import argparse
 import os
+from concurrent.futures import ThreadPoolExecutor
+import ast
 
 import pandas as pd
 import numpy as np
 import umap
 import hdbscan
 from sklearn.preprocessing import StandardScaler
+
 
 from src.config.settings import Settings
 from src.data_access.sql_client import SQLClient
@@ -421,24 +424,26 @@ class RecursiveClusteringPipeline:
         if self.local_mode:
             print(df.head())
     
-        # Ensure vectors are lists of numbers
-        # Convert string representations of lists to actual lists
-        import ast
-   
-        # Convert 'vector' column (list of lists) to a 2D numpy array
-        embeddings_list = []
 
-        if self.local_mode:
-            from tqdm import tqdm
-            vector_iter = tqdm(df['vector'], desc="Parsing embeddings")
-        else:
-            vector_iter = df['vector']
+        def parse_vector(vec_str):
+            """Parse string vector to numpy array."""
+            if isinstance(vec_str, str):
+                return np.array(ast.literal_eval(vec_str), dtype=np.float32)
+            return np.array(vec_str, dtype=np.float32)
 
-        for vec in vector_iter:
-
-            float_vec = np.array(ast.literal_eval(vec))            
-            embeddings_list.append(float_vec)
-            
+        # Parallel processing with optional progress bar
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            if self.local_mode:
+                from tqdm import tqdm
+                embeddings_list = list(
+                    tqdm(
+                        executor.map(parse_vector, df['vector']),
+                        total=len(df),
+                        desc="Parsing embeddings"
+                    )
+                )
+            else:
+                embeddings_list = list(executor.map(parse_vector, df['vector']))
 
         embeddings = np.array(embeddings_list)
         
