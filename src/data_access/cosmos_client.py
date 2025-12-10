@@ -173,7 +173,7 @@ class CosmosClient:
             self.connect()
 
         query = "SELECT feedback_id, vector, source, feedback_text FROM embeddings WHERE 1=1"
-        params = []
+      
         if source_filter:
             query += f" AND source = '{source_filter}'"
 
@@ -186,15 +186,15 @@ class CosmosClient:
 
         if print_query:
             print("SQL Query:", query)
-            with self.conn.cursor() as cursor:
-                cursor.execute(query)
-                results = cursor.fetchall()
-                # Preserve data types from DB (e.g., vector as list of floats)
-                return [
-                (
-                    row[0],  # feedback_id (str)
-                    row[1],
-                    row[2]   # source (str)
-                )
-                for row in results
-                ]
+        with self.conn.cursor() as cursor:
+            cursor.execute(query)
+            results = cursor.fetchall()
+            # Preserve data types from DB (e.g., vector as list of floats)
+            return [
+            (
+                row[0],  # feedback_id (str)
+                row[1],
+                row[2]   # source (str)
+            )
+            for row in results
+            ]

@@ -29,7 +29,7 @@ class RecursiveClusteringPipeline:
     Implements the approach from the article for customer segmentation.
     """
 
-    def __init__(self, config: Settings, umap_params: Optional[Dict[str, Any]] = None, hdbscan_params: Optional[Dict[str, Any]] = None, recursive_depth: int = 1, min_cluster_size_pct: float = 0.01, local_mode: bool = False, output_dir: str = "./cluster_output"):
+    def __init__(self, config: Settings, umap_params: Optional[Dict[str, Any]] = None,  recursive_depth: int = 1, min_cluster_size_pct: float = 0.02, min_sample_pct: float = 0.003, local_mode: bool = False, output_dir: str = "./cluster_output"):
         self.config = config
         self.sql_client = SQLClient(config)
         self.cosmos_client = CosmosClient(config)
@@ -38,19 +38,13 @@ class RecursiveClusteringPipeline:
         self.umap_params = umap_params or {
             'n_neighbors': 15,
             'n_components': 2,
-            'metric': 'cosine',
-            'random_state': 42
+            'metric': 'cosine'
         }
         
-        # Default HDBSCAN parameters
-        self.hdbscan_params = hdbscan_params or {
-            'min_cluster_size': 500,
-            'min_samples': 10,
-            'metric': 'euclidean'
-        }
         
         self.recursive_depth = recursive_depth
         self.min_cluster_size_pct = min_cluster_size_pct
+        self.min_sample_pct = min_sample_pct # Minimum samples as percentage of data for HDBSCAN
         self.cluster_hierarchy = {}
         self.local_mode = local_mode
         self.output_dir = output_dir
@@ -130,11 +124,12 @@ class RecursiveClusteringPipeline:
         reducer = umap.UMAP(**self.umap_params)
         return reducer.fit_transform(embeddings)
 
-    def _apply_hdbscan(self, reduced_data: np.ndarray, min_cluster_size: Optional[int] = None) -> Tuple[np.ndarray, hdbscan.HDBSCAN]:
+    def _apply_hdbscan(self, reduced_data: np.ndarray) -> Tuple[np.ndarray, hdbscan.HDBSCAN]:
         """Apply HDBSCAN clustering and return labels + clusterer object."""
-        params = self.hdbscan_params.copy()
-        if min_cluster_size:
-            params['min_cluster_size'] = min_cluster_size
+        params = {}
+        params['min_samples'] = int(len(reduced_data) * self.min_sample_pct)
+        params['min_cluster_size'] = int(len(reduced_data) * self.min_cluster_size_pct)
+        params["metric"] = "euclidean"
             
         logger.info(f"Applying HDBSCAN with params: {params}")
         clusterer = hdbscan.HDBSCAN(**params)
@@ -308,7 +303,7 @@ class RecursiveClusteringPipeline:
 
     def _recursive_cluster(self, embeddings: np.ndarray, indices: np.ndarray, parent_label: str = "root", current_depth: int = 0, df: pd.DataFrame = None) -> Dict[int, str]:
 
-        if current_depth >= self.recursive_depth or len(indices) < self.hdbscan_params['min_cluster_size']:
+        if current_depth >= self.recursive_depth or len(indices) <int(len(indices) * self.min_cluster_size_pct):
             return {idx: parent_label for idx in indices}
         
         logger.info(f"Clustering {len(indices)} points at depth {current_depth} (parent: {parent_label})")
@@ -322,11 +317,8 @@ class RecursiveClusteringPipeline:
             logger.info(f"UMAP trustworthiness at depth {current_depth}: {umap_metrics['trustworthiness']:.3f}")
 
         # Apply HDBSCAN with dynamic min_cluster_size based on subset size
-        min_size = max(
-            self.hdbscan_params['min_cluster_size'],
-            int(len(indices) * self.min_cluster_size_pct)
-        )
-
+        min_size =  int(len(indices) * self.min_cluster_size_pct)
+        
         labels, clusterer = self._apply_hdbscan(reduced_data, min_cluster_size=min_size)
         
         n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
@@ -436,7 +428,13 @@ class RecursiveClusteringPipeline:
         # Convert 'vector' column (list of lists) to a 2D numpy array
         embeddings_list = []
 
-        for vec in df['vector']:
+        if self.local_mode:
+            from tqdm import tqdm
+            vector_iter = tqdm(df['vector'], desc="Parsing embeddings")
+        else:
+            vector_iter = df['vector']
+
+        for vec in vector_iter:
 
             float_vec = np.array(ast.literal_eval(vec))            
             embeddings_list.append(float_vec)
@@ -517,9 +515,10 @@ def main():
     parser.add_argument("--start-date", type=str, help="Start date (YYYY-MM-DD).")
     parser.add_argument("--end-date", type=str, help="End date (YYYY-MM-DD).")
     parser.add_argument("--limit", type=int, default=None, help="Max records to cluster.")
-    parser.add_argument("--recursive-depth", type=int, default=1, help="How many levels to recurse (1 = no recursion).")
-    parser.add_argument("--min-cluster-size", type=int, default=100, help="Minimum cluster size for HDBSCAN.")
-    parser.add_argument("--min-cluster-pct", type=float, default=0.01, help="Min cluster size as percentage of data.")
+    parser.add_argument("--recursive-depth", type=int, default=5, help="How many levels to recurse (1 = no recursion).")
+    #parser.add_argument("--min-cluster-size", type=int, default=20, help="Minimum cluster size for HDBSCAN.")
+    parser.add_argument("--min-cluster-pct", type=float, default=0.02, help="Min cluster size as percentage of data.")
+    parser.add_argument("--min-sample-pct", type=float, default=0.003, help="Min samples as percentage of data for HDBSCAN.")
     parser.add_argument("--n-neighbors", type=int, default=15, help="UMAP n_neighbors parameter.")
     parser.add_argument("--n-components", type=int, default=2, help="UMAP n_components (dimensions).")
     parser.add_argument("--local", action='store_true', help="Enable local mode with visualizations and analysis.")
@@ -542,18 +541,13 @@ def main():
         'random_state': 42
     }
 
-    hdbscan_params = {
-        'min_cluster_size': args.min_cluster_size,
-        'min_samples': 10,
-        'metric': args.hdbscan_metric
-    }
 
     pipeline = RecursiveClusteringPipeline(
         config,
         umap_params=umap_params,
-        hdbscan_params=hdbscan_params,
         recursive_depth=args.recursive_depth,
         min_cluster_size_pct=args.min_cluster_pct,
+        min_sample_pct=args.min_sample_pct,
         local_mode=args.local,
         output_dir=args.output_dir
     )
