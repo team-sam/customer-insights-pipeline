@@ -32,7 +32,17 @@ class RecursiveClusteringPipeline:
     Implements the approach from the article for customer segmentation.
     """
 
-    def __init__(self, config: Settings, umap_params: Optional[Dict[str, Any]] = None,  recursive_depth: int = 1, min_cluster_size_pct: float = 0.02, min_sample_pct: float = 0.003, hdbscan_metric: str = "euclidean", local_mode: bool = False, output_dir: str = "./cluster_output"):
+    def __init__(
+        self,
+        config: Settings,
+        umap_params: Optional[Dict[str, Any]] = None,
+        recursive_depth: int = 1,
+        min_cluster_size_pct: float = 0.02,
+        min_sample_pct: float = 0.003,
+        hdbscan_metric: str = "euclidean",
+        local_mode: bool = False,
+        output_dir: str = "./cluster_output"
+    ):
         self.config = config
         self.sql_client = SQLClient(config)
         self.cosmos_client = CosmosClient(config)
