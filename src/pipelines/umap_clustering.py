@@ -81,13 +81,7 @@ class RecursiveClusteringPipeline:
             'trustworthiness': float(trust)
         }
 
-    def _evaluate_clustering_quality(
-        self, 
-        original_embeddings: np.ndarray,
-        reduced_data: np.ndarray, 
-        labels: np.ndarray,
-        clusterer: hdbscan.HDBSCAN
-    ) -> Dict[str, float]:
+    def _evaluate_clustering_quality( self, original_embeddings: np.ndarray, reduced_data: np.ndarray,  labels: np.ndarray, clusterer: hdbscan.HDBSCAN) -> Dict[str, float]:
         """
         Evaluate clustering quality with metrics appropriate for UMAP + HDBSCAN.
         """
