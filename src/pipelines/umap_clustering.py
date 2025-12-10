@@ -32,13 +32,23 @@ class RecursiveClusteringPipeline:
     Implements the approach from the article for customer segmentation.
     """
 
-    def __init__(self, config: Settings, umap_params: Optional[Dict[str, Any]] = None,  recursive_depth: int = 1, min_cluster_size_pct: float = 0.02, min_sample_pct: float = 0.003, local_mode: bool = False, output_dir: str = "./cluster_output"):
+    def __init__(
+        self,
+        config: Settings,
+        umap_params: Optional[Dict[str, Any]] = None,
+        recursive_depth: int = 1,
+        min_cluster_size_pct: float = 0.02,
+        min_sample_pct: float = 0.003,
+        hdbscan_metric: str = "euclidean",
+        local_mode: bool = False,
+        output_dir: str = "./cluster_output"
+    ):
         self.config = config
         self.sql_client = SQLClient(config)
         self.cosmos_client = CosmosClient(config)
         
-        # Default UMAP parameters
-        self.umap_params = umap_params or {
+        # Default UMAP parameters (base values for adaptation)
+        self.base_umap_params = umap_params or {
             'n_neighbors': 15,
             'n_components': 3,
             'metric': 'cosine'
@@ -46,8 +56,9 @@ class RecursiveClusteringPipeline:
         
         
         self.recursive_depth = recursive_depth
-        self.min_cluster_size_pct = min_cluster_size_pct
-        self.min_sample_pct = min_sample_pct 
+        self.base_min_cluster_pct = min_cluster_size_pct
+        self.base_min_sample_pct = min_sample_pct 
+        self.hdbscan_metric = hdbscan_metric
         self.cluster_hierarchy = {}
         self.local_mode = local_mode
         self.output_dir = output_dir
@@ -69,6 +80,131 @@ class RecursiveClusteringPipeline:
                 self.local_mode = False
 
 
+    def _get_adaptive_umap_params(self, depth: int, n_points: int) -> Dict[str, Any]:
+        """
+        Calculate UMAP parameters dynamically based on cluster size and depth.
+        
+        Args:
+            depth: Current recursion depth
+            n_points: Number of points in the current cluster
+            
+        Returns:
+            Complete dictionary of UMAP parameters ready to pass to UMAP constructor
+        """
+        # Start with a copy of base parameters
+        params = self.base_umap_params.copy()
+        
+        # Calculate size-based n_neighbors using square root rule
+        n_neighbors = np.sqrt(n_points) / 2
+        
+        # Apply depth adjustment multiplier (15% reduction per level)
+        n_neighbors = n_neighbors * (0.85 ** depth)
+        
+        # Enforce practical bounds
+        n_neighbors = np.clip(n_neighbors, 5, 30)
+        
+        # Percentage-based constraint: never exceed 5% of dataset size
+        max_neighbors = int(n_points * 0.05)
+        n_neighbors = min(n_neighbors, max_neighbors)
+        
+        # Convert to integer
+        params['n_neighbors'] = int(n_neighbors)
+        
+        # Adjust min_dist based on cluster size
+        if n_points < 100:
+            params['min_dist'] = 0.0
+        elif n_points < 500:
+            params['min_dist'] = 0.05
+        else:
+            params['min_dist'] = 0.1
+        
+        return params
+
+    def _get_adaptive_hdbscan_params(self, depth: int, n_points: int) -> Dict[str, Any]:
+        """
+        Calculate HDBSCAN parameters dynamically based on cluster size and depth.
+        
+        Args:
+            depth: Current recursion depth
+            n_points: Number of points in the current cluster
+            
+        Returns:
+            Complete dictionary of HDBSCAN parameters ready to pass to HDBSCAN constructor
+        """
+        # Calculate depth-adjusted percentage (exponential decay)
+        adjusted_pct = self.base_min_cluster_pct * (0.6 ** depth)
+        
+        # Convert to absolute number
+        min_cluster_size = int(adjusted_pct * n_points)
+        
+        # Define size-based bounds
+        if n_points < 100:
+            min_bound, max_bound = 5, n_points // 5
+        elif n_points < 500:
+            min_bound, max_bound = 8, n_points // 8
+        elif n_points < 2000:
+            min_bound, max_bound = 10, n_points // 10
+        else:
+            min_bound, max_bound = 15, n_points // 10
+        
+        # Clip to bounds
+        min_cluster_size = np.clip(min_cluster_size, min_bound, max_bound)
+        
+        # Calculate min_samples (half of min_cluster_size, but at least 3)
+        min_samples = max(3, min(min_cluster_size // 2, min_cluster_size))
+        
+        # Build parameter dictionary
+        params = {
+            'min_cluster_size': int(min_cluster_size),
+            'min_samples': int(min_samples),
+            'metric': self.hdbscan_metric
+        }
+        
+        # Add cluster_selection_epsilon for deeper levels with small clusters
+        if depth >= 2 and n_points < 500:
+            params['cluster_selection_epsilon'] = 0.1
+        
+        return params
+
+    def _should_recurse(self, depth: int, n_points: int, n_clusters: int = 0, 
+                       cluster_quality: Optional[Dict[str, float]] = None) -> bool:
+        """
+        Make smart decisions about when to stop recursing.
+        
+        Args:
+            depth: Current recursion depth
+            n_points: Number of points in the cluster
+            n_clusters: Number of clusters found at this level
+            cluster_quality: Optional quality metrics dictionary
+            
+        Returns:
+            Boolean indicating whether to continue recursing
+        """
+        # Check max depth
+        if depth >= self.recursive_depth:
+            return False
+        
+        # Calculate adaptive minimum points threshold
+        min_points_threshold = 50 * (1.3 ** depth)
+        if n_points < min_points_threshold:
+            return False
+        
+        # Check cluster quality if provided
+        if cluster_quality is not None:
+            # Check for over-fragmentation
+            if n_clusters > n_points / 10:
+                return False
+            
+            # Check for excessive noise
+            if cluster_quality.get('noise_ratio', 0) > 0.5:
+                return False
+            
+            # Check for instability
+            if cluster_quality.get('mean_persistence', 1.0) < 0.05:
+                return False
+        
+        return True
+
     def _evaluate_umap_quality(self, original_embeddings: np.ndarray, reduced_embeddings: np.ndarray, n_neighbors: int = 15) -> Dict[str, float]:
 
         from sklearn.manifold import trustworthiness
@@ -79,7 +215,7 @@ class RecursiveClusteringPipeline:
             'trustworthiness': float(trust)
         }
 
-    def _evaluate_clustering_quality( self, labels: np.ndarray, clusterer: hdbscan.HDBSCAN) -> Dict[str, float]:
+    def _evaluate_clustering_quality(self, labels: np.ndarray, clusterer: hdbscan.HDBSCAN) -> Dict[str, float]:
         """
         Evaluate clustering quality with metrics appropriate for UMAP + HDBSCAN.
         """
@@ -112,25 +248,6 @@ class RecursiveClusteringPipeline:
             metrics['cluster_size_std'] = float(cluster_sizes.std())
         
         return metrics
-
-    def _apply_umap(self, embeddings: np.ndarray) -> np.ndarray:
-        """Apply UMAP dimensionality reduction."""
-        logger.info(f"Applying UMAP with params: {self.umap_params}")
-        reducer = umap.UMAP(**self.umap_params)
-        return reducer.fit_transform(embeddings)
-
-    def _apply_hdbscan(self, reduced_data: np.ndarray) -> Tuple[np.ndarray, hdbscan.HDBSCAN]:
-        """Apply HDBSCAN clustering and return labels + clusterer object."""
-        params = {}
-        params['min_samples'] = int(len(reduced_data) * self.min_sample_pct)
-        params['min_cluster_size'] = int(len(reduced_data) * self.min_cluster_size_pct)
-        params["metric"] = "euclidean"
-            
-        logger.info(f"Applying HDBSCAN with params: {params}")
-        clusterer = hdbscan.HDBSCAN(**params)
-        labels = clusterer.fit_predict(reduced_data)
-        
-        return labels, clusterer
 
     def _visualize_clusters(self, reduced_data: np.ndarray, labels: np.ndarray, parent_label: str, depth: int, df_subset: pd.DataFrame = None):
         """Create visualizations for clusters (local mode only)."""
@@ -298,39 +415,54 @@ class RecursiveClusteringPipeline:
 
     def _recursive_cluster(self, embeddings: np.ndarray, indices: np.ndarray, parent_label: str = "root", current_depth: int = 0, df: pd.DataFrame = None) -> Dict[int, str]:
 
-        if current_depth >= self.recursive_depth:
+        # Check if we should recurse (initial check with n_clusters=0)
+        if not self._should_recurse(current_depth, len(indices), n_clusters=0):
             return {idx: parent_label for idx in indices}
         
         logger.info(f"Clustering {len(indices)} points at depth {current_depth} (parent: {parent_label})")
         
         subset_embeddings = embeddings[indices]
         
-        reduced_data = self._apply_umap(subset_embeddings)
+        # Get adaptive UMAP parameters and apply UMAP
+        umap_params = self._get_adaptive_umap_params(current_depth, len(indices))
+        logger.info(f"Applying UMAP with adaptive params: {umap_params}")
+        reducer = umap.UMAP(**umap_params)
+        reduced_data = reducer.fit_transform(subset_embeddings)
      
-        # Apply HDBSCAN with dynamic min_cluster_size based on subset size
-        min_size =  int(len(indices) * self.min_cluster_size_pct)
-        
-        labels, clusterer = self._apply_hdbscan(reduced_data)
+        if self.local_mode:
+            umap_metrics = self._evaluate_umap_quality(subset_embeddings, reduced_data, n_neighbors=umap_params['n_neighbors'])
+            logger.info(f"UMAP trustworthiness at depth {current_depth}: {umap_metrics['trustworthiness']:.3f}")
+
+        # Get adaptive HDBSCAN parameters and apply HDBSCAN
+        hdbscan_params = self._get_adaptive_hdbscan_params(current_depth, len(indices))
+        logger.info(f"Applying HDBSCAN with adaptive params: {hdbscan_params}")
+        clusterer = hdbscan.HDBSCAN(**hdbscan_params)
+        labels = clusterer.fit_predict(reduced_data)
         
         n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
         logger.info(f"Found {n_clusters} clusters at depth {current_depth}")
         
         # Evaluate clustering quality and store metrics
+        cluster_metrics = self._evaluate_clustering_quality(labels, clusterer)
+        logger.info(f"Clustering metrics at depth {current_depth}: n_clusters={cluster_metrics['n_clusters']}, noise_ratio={cluster_metrics['noise_ratio']:.2%}")
+        
+        # Store parameters and metrics in hierarchy
+        hierarchy_entry = {
+            'n_points': len(indices),
+            'n_clusters': cluster_metrics['n_clusters'],
+            'depth': current_depth,
+            'umap_params': umap_params,
+            'hdbscan_params': hdbscan_params,
+            'cluster_quality': cluster_metrics
+        }
+        
         if self.local_mode:
-            umap_metrics = self._evaluate_umap_quality(subset_embeddings, reduced_data)
-            logger.info(f"UMAP trustworthiness at depth {current_depth}: {umap_metrics['trustworthiness']:.3f}")
-            cluster_metrics = self._evaluate_clustering_quality(labels, clusterer)
-            logger.info(f"Clustering metrics at depth {current_depth}:")
+            hierarchy_entry['umap_metrics'] = umap_metrics
             
-            self.cluster_hierarchy[parent_label] = {
-                'n_points': len(indices),
-                'n_clusters': cluster_metrics['n_clusters'],
-                'depth': current_depth,
-                'umap_metrics': umap_metrics,
-                'cluster_quality': cluster_metrics
-            }
+        self.cluster_hierarchy[parent_label] = hierarchy_entry
 
-            # Visualize
+        # Visualize in local mode
+        if self.local_mode:
             df_subset = df.iloc[indices].copy()
             temp_labels = labels.copy()
             df_subset['temp_cluster'] = temp_labels
@@ -352,8 +484,15 @@ class RecursiveClusteringPipeline:
             else:
                 hierarchical_label = f"{parent_label}.{cluster_id}"
                 
-                # Recurse if we haven't reached max depth and cluster is large enough
-                if current_depth < self.recursive_depth - 1 and len(cluster_indices) >= min_size * 2:
+                # Use intelligent recursion decision
+                should_recurse = self._should_recurse(
+                    current_depth + 1,
+                    len(cluster_indices),
+                    n_clusters=n_clusters,
+                    cluster_quality=cluster_metrics
+                )
+                
+                if should_recurse:
                     sub_clusters = self._recursive_cluster(
                         embeddings,
                         cluster_indices,
@@ -542,6 +681,7 @@ def main():
         recursive_depth=args.recursive_depth,
         min_cluster_size_pct=args.min_cluster_pct,
         min_sample_pct=args.min_sample_pct,
+        hdbscan_metric=args.hdbscan_metric,
         local_mode=args.local,
         output_dir=args.output_dir
     )
