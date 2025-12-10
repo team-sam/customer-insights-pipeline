@@ -43,6 +43,7 @@ src/config/settings.py
 *.csv
 *.xlsx
 *.xls
+*.txt
 
 # Logs
 *.log

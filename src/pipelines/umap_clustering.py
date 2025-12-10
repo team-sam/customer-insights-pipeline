@@ -40,20 +40,18 @@ class RecursiveClusteringPipeline:
         # Default UMAP parameters
         self.umap_params = umap_params or {
             'n_neighbors': 15,
-            'n_components': 2,
+            'n_components': 3,
             'metric': 'cosine'
         }
         
         
         self.recursive_depth = recursive_depth
         self.min_cluster_size_pct = min_cluster_size_pct
-        self.min_sample_pct = min_sample_pct # Minimum samples as percentage of data for HDBSCAN
+        self.min_sample_pct = min_sample_pct 
         self.cluster_hierarchy = {}
         self.local_mode = local_mode
         self.output_dir = output_dir
         
-        # Storage for visualization data
-        self.viz_data = []
         
         if self.local_mode:
             os.makedirs(self.output_dir, exist_ok=True)
@@ -81,7 +79,7 @@ class RecursiveClusteringPipeline:
             'trustworthiness': float(trust)
         }
 
-    def _evaluate_clustering_quality( self, original_embeddings: np.ndarray, reduced_data: np.ndarray,  labels: np.ndarray, clusterer: hdbscan.HDBSCAN) -> Dict[str, float]:
+    def _evaluate_clustering_quality( self, labels: np.ndarray, clusterer: hdbscan.HDBSCAN) -> Dict[str, float]:
         """
         Evaluate clustering quality with metrics appropriate for UMAP + HDBSCAN.
         """
@@ -300,7 +298,7 @@ class RecursiveClusteringPipeline:
 
     def _recursive_cluster(self, embeddings: np.ndarray, indices: np.ndarray, parent_label: str = "root", current_depth: int = 0, df: pd.DataFrame = None) -> Dict[int, str]:
 
-        if current_depth >= self.recursive_depth or len(indices) <int(len(indices) * self.min_cluster_size_pct):
+        if current_depth >= self.recursive_depth:
             return {idx: parent_label for idx in indices}
         
         logger.info(f"Clustering {len(indices)} points at depth {current_depth} (parent: {parent_label})")
@@ -309,21 +307,19 @@ class RecursiveClusteringPipeline:
         
         reduced_data = self._apply_umap(subset_embeddings)
      
-        if self.local_mode:
-            umap_metrics = self._evaluate_umap_quality(subset_embeddings, reduced_data)
-            logger.info(f"UMAP trustworthiness at depth {current_depth}: {umap_metrics['trustworthiness']:.3f}")
-
         # Apply HDBSCAN with dynamic min_cluster_size based on subset size
         min_size =  int(len(indices) * self.min_cluster_size_pct)
         
-        labels, clusterer = self._apply_hdbscan(reduced_data, min_cluster_size=min_size)
+        labels, clusterer = self._apply_hdbscan(reduced_data)
         
         n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
         logger.info(f"Found {n_clusters} clusters at depth {current_depth}")
         
         # Evaluate clustering quality and store metrics
         if self.local_mode:
-            cluster_metrics = self._evaluate_clustering_quality(subset_embeddings, reduced_data, labels, clusterer)
+            umap_metrics = self._evaluate_umap_quality(subset_embeddings, reduced_data)
+            logger.info(f"UMAP trustworthiness at depth {current_depth}: {umap_metrics['trustworthiness']:.3f}")
+            cluster_metrics = self._evaluate_clustering_quality(labels, clusterer)
             logger.info(f"Clustering metrics at depth {current_depth}:")
             
             self.cluster_hierarchy[parent_label] = {
@@ -522,7 +518,6 @@ def main():
     parser.add_argument("--n-components", type=int, default=2, help="UMAP n_components (dimensions).")
     parser.add_argument("--local", action='store_true', help="Enable local mode with visualizations and analysis.")
     parser.add_argument("--output-dir", type=str, default="./cluster_output", help="Output directory for local mode files.")
-    parser.add_argument("--hdbscan-metric", type=str, default="euclidean", choices=["euclidean", "cosine"], help="Distance metric for HDBSCAN.")
 
     args = parser.parse_args()
 
