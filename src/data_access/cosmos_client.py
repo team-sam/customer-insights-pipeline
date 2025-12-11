@@ -73,7 +73,7 @@ class CosmosClient:
             self.connect()
         
         values = [
-            (r.feedback_id, r.vector, r.model, r.source, r.created_at, r.feedback_text)
+            (r.feedback_id, r.vector, r.model, r.source, r.created_at, r.feedback_text, r.style)
             for r in records
         ]
         

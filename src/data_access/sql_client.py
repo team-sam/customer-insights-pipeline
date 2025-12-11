@@ -39,6 +39,7 @@ class SQLClient:
               AND feedback_text IS NOT NULL
               AND LTRIM(RTRIM(feedback_text)) <> ''
               AND feedback_text LIKE '%[A-Za-z0-9]%'
+              AND feedback_source IS NOT NULL
         """
 
         params = []
