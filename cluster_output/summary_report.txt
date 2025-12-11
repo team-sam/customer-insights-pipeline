@@ -2,36 +2,176 @@
 CLUSTERING SUMMARY REPORT
 ================================================================================
 
-Total Reviews Analyzed: 4208
-Total Unique Clusters: 6
-Recursive Depth: 1
+Total Reviews Analyzed: 10126
+Total Unique Clusters: 150
+Recursive Depth: 3
 
 --------------------------------------------------------------------------------
 QUALITY METRICS BY DEPTH
 --------------------------------------------------------------------------------
 
 root (Depth 0):
-  Points: 4208
+  Points: 10126
+  Clusters: 6
+  UMAP Trustworthiness: 0.951
+  Mean Persistence: 0.295
+  Mean Probability: 0.806
+  Noise Ratio: 9.9%
+
+root.0 (Depth 1):
+  Points: 666
+  Clusters: 2
+  UMAP Trustworthiness: 0.503
+  Mean Persistence: 0.066
+  Mean Probability: 0.674
+  Noise Ratio: 29.7%
+
+root.0.1 (Depth 2):
+  Points: 456
   Clusters: 5
-  UMAP Trustworthiness: 0.956
-  Mean Persistence: 0.303
+  UMAP Trustworthiness: 0.515
+  Mean Persistence: 0.079
+  Mean Probability: 0.696
+  Noise Ratio: 28.5%
+
+root.1 (Depth 1):
+  Points: 592
+  Clusters: 9
+  UMAP Trustworthiness: 0.917
+  Mean Persistence: 0.547
   Mean Probability: 0.870
-  Noise Ratio: 8.4%
+  Noise Ratio: 0.0%
+
+root.1.1 (Depth 2):
+  Points: 186
+  Clusters: 2
+  UMAP Trustworthiness: 0.512
+  Mean Persistence: 0.055
+  Mean Probability: 0.278
+  Noise Ratio: 72.0%
+
+root.1.3 (Depth 2):
+  Points: 98
+  Clusters: 2
+  UMAP Trustworthiness: 0.547
+  Mean Persistence: 0.029
+  Mean Probability: 0.455
+  Noise Ratio: 54.1%
+
+root.2 (Depth 1):
+  Points: 5416
+  Clusters: 6
+  UMAP Trustworthiness: 0.934
+  Mean Persistence: 0.249
+  Mean Probability: 0.940
+  Noise Ratio: 4.1%
+
+root.2.2 (Depth 2):
+  Points: 125
+  Clusters: 10
+  UMAP Trustworthiness: 0.883
+  Mean Persistence: 0.317
+  Mean Probability: 0.816
+  Noise Ratio: 10.4%
+
+root.2.3 (Depth 2):
+  Points: 128
+  Clusters: 7
+  UMAP Trustworthiness: 0.787
+  Mean Persistence: 0.404
+  Mean Probability: 0.886
+  Noise Ratio: 0.8%
+
+root.2.4 (Depth 2):
+  Points: 193
+  Clusters: 8
+  UMAP Trustworthiness: 0.913
+  Mean Persistence: 0.400
+  Mean Probability: 0.873
+  Noise Ratio: 0.5%
+
+root.2.5 (Depth 2):
+  Points: 4588
+  Clusters: 27
+  UMAP Trustworthiness: 0.934
+  Mean Persistence: 0.164
+  Mean Probability: 0.669
+  Noise Ratio: 24.8%
+
+root.3 (Depth 1):
+  Points: 253
+  Clusters: 9
+  UMAP Trustworthiness: 0.912
+  Mean Persistence: 0.220
+  Mean Probability: 0.691
+  Noise Ratio: 19.4%
+
+root.4 (Depth 1):
+  Points: 330
+  Clusters: 2
+  UMAP Trustworthiness: 0.796
+  Mean Persistence: 0.229
+  Mean Probability: 0.988
+  Noise Ratio: 0.0%
+
+root.4.1 (Depth 2):
+  Points: 318
+  Clusters: 15
+  UMAP Trustworthiness: 0.811
+  Mean Persistence: 0.116
+  Mean Probability: 0.664
+  Noise Ratio: 29.9%
+
+root.5 (Depth 1):
+  Points: 1865
+  Clusters: 2
+  UMAP Trustworthiness: 0.878
+  Mean Persistence: 0.172
+  Mean Probability: 0.950
+  Noise Ratio: 2.6%
+
+root.5.0 (Depth 2):
+  Points: 789
+  Clusters: 16
+  UMAP Trustworthiness: 0.881
+  Mean Persistence: 0.185
+  Mean Probability: 0.723
+  Noise Ratio: 20.9%
+
+root.5.1 (Depth 2):
+  Points: 1027
+  Clusters: 23
+  UMAP Trustworthiness: 0.861
+  Mean Persistence: 0.103
+  Mean Probability: 0.594
+  Noise Ratio: 34.5%
 
 --------------------------------------------------------------------------------
 CLUSTER BREAKDOWN BY DEPTH
 --------------------------------------------------------------------------------
 
 Depth 1:
-  Clusters: 6
-  Reviews: 4208
+  Clusters: 1
+  Reviews: 1004
+
+Depth 2:
+  Clusters: 24
+  Reviews: 1214
+
+Depth 3:
+  Clusters: 125
+  Reviews: 7908
 
 --------------------------------------------------------------------------------
 TOP 10 LARGEST CLUSTERS
 --------------------------------------------------------------------------------
-1. root.4: 1984 reviews (47.1%)
-2. root.2: 1194 reviews (28.4%)
-3. root.noise: 352 reviews (8.4%)
-4. root.3: 279 reviews (6.6%)
-5. root.1: 225 reviews (5.3%)
-6. root.0: 174 reviews (4.1%)
+1. root.2.5.noise: 1139 reviews (11.2%)
+2. root.noise: 1004 reviews (9.9%)
+3. root.2.5.13: 447 reviews (4.4%)
+4. root.2.5.23: 434 reviews (4.3%)
+5. root.2.5.21: 374 reviews (3.7%)
+6. root.5.1.noise: 354 reviews (3.5%)
+7. root.0.1.4: 252 reviews (2.5%)
+8. root.2.5.25: 239 reviews (2.4%)
+9. root.5.0.8: 238 reviews (2.4%)
+10. root.2.noise: 223 reviews (2.2%)

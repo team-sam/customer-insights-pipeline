@@ -681,7 +681,7 @@ def main():
         recursive_depth=args.recursive_depth,
         min_cluster_size_pct=args.min_cluster_pct,
         min_sample_pct=args.min_sample_pct,
-        hdbscan_metric=args.hdbscan_metric,
+        hdbscan_metric='euclidean',
         local_mode=args.local,
         output_dir=args.output_dir
     )
