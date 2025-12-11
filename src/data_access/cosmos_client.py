@@ -47,6 +47,7 @@ class CosmosClient:
             vector vector(1536),
             model VARCHAR(100),
             source VARCHAR(50),
+            style VARCHAR(200),
             created_at TIMESTAMP
         );
 
@@ -78,14 +79,15 @@ class CosmosClient:
         
         
         query = """
-            INSERT INTO embeddings (feedback_id, vector, model, source, created_at, feedback_text)
+            INSERT INTO embeddings (feedback_id, vector, model, source, created_at, feedback_text,style)
             VALUES %s
             ON CONFLICT (feedback_id) DO UPDATE 
             SET vector = EXCLUDED.vector, 
                 model = EXCLUDED.model,
                 source = EXCLUDED.source,
                 created_at = EXCLUDED.created_at,
-                feedback_text = EXCLUDED.feedback_text
+                feedback_text = EXCLUDED.feedback_text,
+                style = EXCLUDED.style
         """
         
         with self.conn.cursor() as cursor:
@@ -131,20 +133,12 @@ class CosmosClient:
             return cursor.fetchall()
     
     def get_embeddings_by_ids(self, feedback_ids: List[str]) -> List[Tuple[str, List[float], str]]:
-        """
-        Retrieve embeddings for specific feedback IDs.
-        
-        Args:
-            feedback_ids: List of feedback IDs
-        
-        Returns:
-            List of (feedback_id, vector, source, feedback_text) tuples
-        """
+
         if not self.conn:
             self.connect()
         
         query = """
-            SELECT feedback_id, vector, source, feedback_text
+            SELECT feedback_id, vector, source, feedback_text, style
             FROM embeddings
             WHERE feedback_id = ANY(%s)
         """
@@ -157,22 +151,11 @@ class CosmosClient:
 
     
     def get_all_embeddings(self, start_date: Optional[str] = None, end_date: Optional[str] = None, source_filter: Optional[str] = None, print_query: bool = False) -> List[Tuple[str, List[float], str]]:
-        """
-        Retrieve all embeddings, optionally filtered by date range and source.
 
-        Args:
-            start_date: Optional start date filter
-            end_date: Optional end date filter
-            source_filter: Optional filter by source (review, return, chat)
-            print_query: If True, print the SQL query and parameters
-
-        Returns:
-            List of (feedback_id, vector, source, feedback_text) tuples
-        """
         if not self.conn:
             self.connect()
 
-        query = "SELECT feedback_id, vector, source, feedback_text FROM embeddings WHERE 1=1"
+        query = "SELECT feedback_id, vector, source, feedback_text, style FROM embeddings WHERE 1=1"
       
         if source_filter:
             query += f" AND source = '{source_filter}'"

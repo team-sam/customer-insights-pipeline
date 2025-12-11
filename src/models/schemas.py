@@ -14,6 +14,7 @@ class FeedbackRecord(BaseModel):
     source: str
     created_at: datetime
     product_id: Optional[str] = None
+    style: Optional[str] = None
     category: Optional[str] = None
     rating: Optional[int] = None
     cluster_id: Optional[int] = None
@@ -27,6 +28,7 @@ class EmbeddingRecord(BaseModel):
     model: str
     created_at: datetime
     feedback_text: str
+    style: Optional[str] = None
 
 
 class ClusterRecord(BaseModel):
@@ -34,6 +36,7 @@ class ClusterRecord(BaseModel):
     cluster_id: int
     label: str
     description: str
+    style: Optional[str] = None
     sample_feedback_ids: List[str]
     record_count: int
     period_start: datetime
