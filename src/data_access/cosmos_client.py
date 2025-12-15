@@ -150,7 +150,7 @@ class CosmosClient:
    
 
     
-    def get_all_embeddings(self, start_date: Optional[str] = None, end_date: Optional[str] = None, source_filter: Optional[str] = None, print_query: bool = False) -> List[Tuple[str, List[float], str]]:
+    def get_all_embeddings(self, start_date: Optional[str] = None, end_date: Optional[str] = None, source_filter: Optional[str] = None, print_query: bool = False) -> List[Tuple[str, List[float], str, Optional[str]]]:
 
         if not self.conn:
             self.connect()
@@ -176,8 +176,9 @@ class CosmosClient:
             return [
             (
                 row[0],  # feedback_id (str)
-                row[1],
-                row[2]   # source (str)
+                row[1],  # vector (list of floats)
+                row[2],  # source (str)
+                row[4]   # style (Optional[str])
             )
             for row in results
             ]
