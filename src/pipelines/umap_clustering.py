@@ -19,7 +19,7 @@ import hdbscan
 from src.config.settings import Settings
 from src.data_access.sql_client import SQLClient
 from src.data_access.cosmos_client import CosmosClient
-from src.models.schemas import FeedbackRecord
+from src.models.schemas import FeedbackRecord, ClusterRecord
 
 logger = logging.getLogger(__name__)
 
@@ -742,16 +742,112 @@ class RecursiveClusteringPipeline:
 
         # Optionally persist results
         if not self.local_mode:
-            self._save_results(df)
+            self._save_results(df, start_date, end_date)
 
         return result
 
-    def _save_results(self, df: pd.DataFrame):
+    def _save_results(self, df: pd.DataFrame, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None):
         """Save clustering results back to database."""
-        # Example: update SQL or Cosmos with cluster labels
-        cluster_data = df[['feedback_id', 'cluster_label', 'cluster_depth']].to_dict('records')
-        # self.sql_client.update_feedback_clusters(cluster_data)
-        logger.info(f"Saved clustering results for {len(cluster_data)} records")
+        from src.agents.llm_agent import ChatAgent
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
+        # Step 1: Update feedback table with cluster_id assignments
+        logger.info("Updating feedback table with cluster assignments...")
+        cluster_assignments = [
+            {'feedback_id': row['feedback_id'], 'cluster_id': row['cluster_label']}
+            for _, row in df.iterrows()
+        ]
+        self.sql_client.update_feedback_clusters(cluster_assignments)
+        logger.info(f"Updated {len(cluster_assignments)} feedback records with cluster assignments")
+        
+        # Step 2: Generate cluster descriptions using LLM
+        logger.info("Generating cluster descriptions using LLM...")
+        chat_agent = ChatAgent(self.config)
+        
+        # Group by cluster_label and prepare cluster records
+        cluster_groups = df.groupby('cluster_label')
+        cluster_records = []
+        
+        def generate_description_for_cluster(cluster_label, cluster_df):
+            """Helper function to generate description for a single cluster."""
+            try:
+                # Sample up to 50 reviews for description
+                sample_size = min(50, len(cluster_df))
+                sample_reviews = cluster_df['feedback_text'].sample(n=sample_size, random_state=42).tolist()
+                
+                # Generate description using LLM
+                description = chat_agent.describe_cluster(sample_reviews)
+                
+                return cluster_label, description
+            except Exception as e:
+                logger.error(f"Error generating description for cluster {cluster_label}: {e}")
+                return cluster_label, f"Cluster containing {len(cluster_df)} feedback items"
+        
+        # Use ThreadPoolExecutor to parallelize LLM calls
+        cluster_descriptions = {}
+        with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
+            futures = {
+                executor.submit(generate_description_for_cluster, label, group): label
+                for label, group in cluster_groups
+            }
+            
+            for future in as_completed(futures):
+                try:
+                    label, description = future.result()
+                    cluster_descriptions[label] = description
+                    logger.info(f"Generated description for cluster: {label}")
+                except Exception as e:
+                    label = futures[future]
+                    logger.error(f"Failed to generate description for cluster {label}: {e}")
+                    cluster_descriptions[label] = f"Cluster {label}"
+        
+        # Step 3: Create ClusterRecord objects and insert into database
+        logger.info("Inserting cluster metadata into database...")
+        
+        # Use provided date range or default to current time
+        default_start = start_date if start_date else datetime.now(timezone.utc)
+        default_end = end_date if end_date else datetime.now(timezone.utc)
+        
+        for cluster_label, cluster_df in cluster_groups:
+            # Parse cluster information
+            cluster_depth = cluster_label.count('.')
+            
+            # Extract source and style from cluster_label
+            # Format: source_{source}.style_{style}.{hierarchy}
+            parts = cluster_label.split('.')
+            source = None
+            style = None
+            
+            for part in parts:
+                if part.startswith('source_'):
+                    source = part.replace('source_', '')
+                elif part.startswith('style_'):
+                    style = part.replace('style_', '')
+            
+            # Get sample feedback IDs (up to 50)
+            sample_feedback_ids = cluster_df['feedback_id'].head(50).tolist()
+            
+            cluster_record = ClusterRecord(
+                cluster_id=cluster_label,
+                label=cluster_label,
+                description=cluster_descriptions.get(cluster_label, f"Cluster {cluster_label}"),
+                source=source or 'unknown',
+                style=style,
+                cluster_depth=cluster_depth,
+                sample_feedback_ids=sample_feedback_ids,
+                record_count=len(cluster_df),
+                period_start=default_start,
+                period_end=default_end,
+                created_at=datetime.now(timezone.utc)
+            )
+            cluster_records.append(cluster_record)
+        
+        # Insert all cluster records
+        self.sql_client.insert_clusters(cluster_records)
+        logger.info(f"Inserted {len(cluster_records)} cluster records into database")
 
 
 def main():
