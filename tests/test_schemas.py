@@ -34,12 +34,12 @@ class TestFeedbackRecord:
             product_id="SKU-789",
             category="Footwear",
             rating=5,
-            cluster_id=3
+            cluster_id="source_review.style_chelsea.0.1"
         )
         assert record.product_id == "SKU-789"
         assert record.category == "Footwear"
         assert record.rating == 5
-        assert record.cluster_id == 3
+        assert record.cluster_id == "source_review.style_chelsea.0.1"
 
 
 class TestEmbeddingRecord:
@@ -53,12 +53,14 @@ class TestEmbeddingRecord:
             vector=vector,
             source="review",
             model="text-embedding-3-small",
-            created_at=datetime.now()
+            created_at=datetime.now(),
+            feedback_text="Great product!"
         )
         assert record.feedback_id == "test-123"
         assert len(record.vector) == 1536
         assert record.source == "review"
         assert record.model == "text-embedding-3-small"
+        assert record.feedback_text == "Great product!"
     
     def test_embedding_record_invalid_vector_length(self):
         """Test that EmbeddingRecord rejects invalid vector lengths."""
@@ -79,17 +81,23 @@ class TestClusterRecord:
         """Test creating a valid ClusterRecord."""
         now = datetime.now()
         record = ClusterRecord(
-            cluster_id=1,
+            cluster_id="source_review.style_chelsea.0",
             label="Waterproof Issues",
             description="Customers reporting leaking problems",
+            source="review",
+            style="chelsea",
+            cluster_depth=2,
             sample_feedback_ids=["fb-1", "fb-2", "fb-3"],
             record_count=25,
             period_start=now,
             period_end=now,
             created_at=now
         )
-        assert record.cluster_id == 1
+        assert record.cluster_id == "source_review.style_chelsea.0"
         assert record.label == "Waterproof Issues"
+        assert record.source == "review"
+        assert record.style == "chelsea"
+        assert record.cluster_depth == 2
         assert len(record.sample_feedback_ids) == 3
         assert record.record_count == 25
 

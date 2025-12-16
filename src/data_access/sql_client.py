@@ -153,9 +153,9 @@ class SQLClient:
 
         query = """
             MERGE INTO customer_insights.clusters AS target
-            USING (VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)) AS source 
+            USING (VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)) AS source 
                 (cluster_id, cluster_label, cluster_description, sample_feedback_ids, record_count, 
-                 period_start, period_end, created_at, style)
+                 period_start, period_end, created_at, style, source, cluster_depth)
             ON target.cluster_id = source.cluster_id
             WHEN MATCHED THEN
                 UPDATE SET 
@@ -166,13 +166,16 @@ class SQLClient:
                     period_start = source.period_start,
                     period_end = source.period_end,
                     created_at = source.created_at,
-                    style = source.style
+                    style = source.style,
+                    source = source.source,
+                    cluster_depth = source.cluster_depth
             WHEN NOT MATCHED THEN
                 INSERT (cluster_id, cluster_label, cluster_description, sample_feedback_ids, record_count,
-                        period_start, period_end, created_at, style)
+                        period_start, period_end, created_at, style, source, cluster_depth)
                 VALUES (source.cluster_id, source.cluster_label, source.cluster_description, 
                         source.sample_feedback_ids, source.record_count,
-                        source.period_start, source.period_end, source.created_at, source.style);
+                        source.period_start, source.period_end, source.created_at, source.style,
+                        source.source, source.cluster_depth);
         """
 
         with self.conn.cursor() as cursor:
@@ -182,7 +185,31 @@ class SQLClient:
                     query,
                     (cluster.cluster_id, cluster.label, cluster.description, sample_ids,
                      cluster.record_count, cluster.period_start, cluster.period_end, 
-                     cluster.created_at, cluster.style)
+                     cluster.created_at, cluster.style, cluster.source, cluster.cluster_depth)
+                )
+            self.conn.commit()
+
+    def update_feedback_clusters(self, cluster_assignments: List[dict]) -> None:
+        """
+        Update feedback records with cluster assignments.
+        
+        Args:
+            cluster_assignments: List of dicts with feedback_id and cluster_id
+        """
+        if not self.conn:
+            self.connect()
+
+        query = """
+            UPDATE customer_insights.feedback
+            SET cluster_id = %s
+            WHERE feedback_id = %s
+        """
+
+        with self.conn.cursor() as cursor:
+            for assignment in cluster_assignments:
+                cursor.execute(
+                    query,
+                    (assignment['cluster_id'], assignment['feedback_id'])
                 )
             self.conn.commit()
 

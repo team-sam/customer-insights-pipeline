@@ -86,6 +86,30 @@ class ChatAgent:
         
         return self.chat_single(prompt).strip()
 
+    def describe_cluster(self, feedback_texts: List[str]) -> str:
+        """
+        Generate a detailed description for a cluster based on sample feedback texts.
+        
+        Args:
+            feedback_texts: Sample customer feedback from the cluster (up to 50 samples)
+            
+        Returns:
+            A detailed description of the cluster theme
+        """
+        # Limit to 50 samples for manageable API call size
+        sample_texts = feedback_texts[:50]
+        
+        prompt = f"""You are analyzing customer feedback for Vessi waterproof shoes. Below are {len(sample_texts)} sample comments from a cluster of similar feedback.
+
+Generate a clear, concise description (2-3 sentences) that summarizes the main theme, issues, or sentiments expressed in this cluster.
+
+Sample feedback:
+{chr(10).join(f"{i+1}. {text[:200]}" for i, text in enumerate(sample_texts))}
+
+Return only the description:"""
+        
+        return self.chat_single(prompt).strip()
+
     def tag_feedback(self, feedback_text: str, categories: List[str], allow_multiple: bool = True) -> List[str]:
         """
         Tag a single piece of customer feedback with predefined categories.
