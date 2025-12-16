@@ -55,6 +55,7 @@ logs/
 .coverage
 htmlcov/
 .tox/
+cluster_output/
 
 # OS
 .DS_Store
