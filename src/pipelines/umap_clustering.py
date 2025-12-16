@@ -485,8 +485,23 @@ class RecursiveClusteringPipeline:
         clusterer = hdbscan.HDBSCAN(**hdbscan_params)
         labels = clusterer.fit_predict(reduced_data)
         
+        if not hasattr(clusterer, 'labels_') or len(labels) == 0:
+            logger.warning(f"HDBSCAN failed at {parent_label} (depth {current_depth})")
+            return {idx: f"{parent_label}.failed" for idx in indices}
+
         n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+
+        # Early exit for degenerate cases
+        if n_clusters == 0:
+            logger.warning(f"HDBSCAN found only noise at {parent_label}")
+            return {idx: f"{parent_label}.noise" for idx in indices}
+
+        if n_clusters == 1:
+            logger.info(f"Only 1 cluster at {parent_label}, no subdivision possible")
+            return {idx: f"{parent_label}.0" for idx in indices}
+
         logger.info(f"Found {n_clusters} clusters at depth {current_depth}")
+
         
         # Evaluate clustering quality and store metrics
         cluster_metrics = self._evaluate_clustering_quality(labels, clusterer)
