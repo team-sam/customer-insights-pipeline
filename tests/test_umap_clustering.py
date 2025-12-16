@@ -232,7 +232,7 @@ class TestRecursiveClusteringPipeline:
                 assert params['metric'] == "cosine"
     
     def test_style_based_clustering_partitioning(self, mock_config):
-        """Test that clustering partitions data by style field."""
+        """Test that clustering partitions data by both source and style fields."""
         with patch('src.pipelines.umap_clustering.SQLClient') as mock_sql:
             with patch('src.pipelines.umap_clustering.CosmosClient') as mock_cosmos:
                 pipeline = RecursiveClusteringPipeline(
@@ -241,13 +241,14 @@ class TestRecursiveClusteringPipeline:
                     local_mode=False
                 )
                 
-                # Mock data with different styles
+                # Mock data with different sources and styles
                 mock_embeddings = [
-                    ('id1', [0.1] * 1536, 'review', 'style_a'),
-                    ('id2', [0.2] * 1536, 'review', 'style_a'),
-                    ('id3', [0.3] * 1536, 'review', 'style_b'),
-                    ('id4', [0.4] * 1536, 'review', 'style_b'),
-                    ('id5', [0.5] * 1536, 'review', None),
+                    ('id1', [0.1] * 1536, 'review', 'text1', 'style_a'),
+                    ('id2', [0.2] * 1536, 'review', 'text2', 'style_a'),
+                    ('id3', [0.3] * 1536, 'chat', 'text3', 'style_a'),
+                    ('id4', [0.4] * 1536, 'chat', 'text4', 'style_b'),
+                    ('id5', [0.5] * 1536, 'return', 'text5', 'style_b'),
+                    ('id6', [0.6] * 1536, 'review', 'text6', None),
                 ]
                 
                 mock_cosmos_instance = mock_cosmos.return_value
@@ -257,15 +258,22 @@ class TestRecursiveClusteringPipeline:
                 result = pipeline.run()
                 
                 # Verify clustering was called
-                assert result['total_records'] == 5
+                assert result['total_records'] == 6
                 
-                # Check that cluster labels contain style prefixes
+                # Check that cluster labels contain both source and style prefixes
                 cluster_labels = list(result['clusters'].keys())
-                style_prefixes = set()
-                for label in cluster_labels:
-                    if label.startswith('style_'):
-                        prefix = label.split('.')[0]
-                        style_prefixes.add(prefix)
                 
-                # Should have separate clustering for each style
-                assert 'style_a' in style_prefixes or 'style_b' in style_prefixes or 'style_none' in style_prefixes
+                # Verify we have source_ and style_ in labels
+                has_source_prefix = any('source_' in label for label in cluster_labels)
+                has_style_prefix = any('style_' in label for label in cluster_labels)
+                
+                assert has_source_prefix, f"Expected source_ prefix in labels, got: {cluster_labels}"
+                assert has_style_prefix, f"Expected style_ prefix in labels, got: {cluster_labels}"
+                
+                # Verify hierarchical structure: source_{source}.style_{style}
+                for label in cluster_labels:
+                    if not label.endswith('.unclustered'):
+                        # Should start with source_
+                        assert label.startswith('source_'), f"Expected label to start with 'source_', got: {label}"
+                        # Should contain .style_ 
+                        assert '.style_' in label, f"Expected label to contain '.style_', got: {label}"

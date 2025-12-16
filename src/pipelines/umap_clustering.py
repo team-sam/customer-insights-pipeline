@@ -369,6 +369,22 @@ class RecursiveClusteringPipeline:
         report.append(f"Total Unique Clusters: {df['cluster_label'].nunique()}")
         report.append(f"Recursive Depth: {self.recursive_depth}")
         
+        # Source breakdown
+        if 'source' in df.columns:
+            report.append(f"\n" + "-" * 80)
+            report.append("BREAKDOWN BY SOURCE")
+            report.append("-" * 80)
+            source_stats = df.groupby('source').agg({
+                'cluster_label': 'nunique',
+                'feedback_id': 'count'
+            }).rename(columns={'cluster_label': 'n_clusters', 'feedback_id': 'n_reviews'})
+            
+            for source, row in source_stats.iterrows():
+                source_label = str(source) if source is not None else "none"
+                report.append(f"\nSource: {source_label}")
+                report.append(f"  Reviews: {row['n_reviews']}")
+                report.append(f"  Clusters: {row['n_clusters']}")
+        
         # Style breakdown
         if 'style' in df.columns:
             report.append(f"\n" + "-" * 80)
@@ -609,44 +625,58 @@ class RecursiveClusteringPipeline:
         logger.info(f"Embeddings shape: {embeddings.shape}")
 
 
-        # Partition by style and run clustering on each partition
-        styles = df['style'].unique()
-        logger.info(f"Found {len(styles)} unique styles: {styles}")
+        # Partition by source first, then by style within each source
+        sources = df['source'].unique()
+        logger.info(f"Found {len(sources)} unique sources: {sources}")
         
         all_cluster_mappings = {}
         
-        for style in styles:
-            style_label = str(style) if style is not None else "none"
+        for source in sources:
+            source_label = str(source) if source is not None else "none"
             logger.info(f"\n{'='*80}")
-            logger.info(f"Clustering style: {style_label}")
+            logger.info(f"Processing source: {source_label}")
             logger.info(f"{'='*80}")
             
-            # Get indices for this style
-            style_mask = df['style'] == style
-            style_indices = df[style_mask].index.to_numpy()
+            # Get data for this source
+            source_mask = df['source'] == source
+            source_df = df[source_mask]
             
-            logger.info(f"Processing {len(style_indices)} records for style: {style_label}")
+            # Now partition by style within this source
+            styles = source_df['style'].unique()
+            logger.info(f"Found {len(styles)} unique styles within source {source_label}: {styles}")
             
-            # Run recursive clustering for this style partition
-            style_embeddings = embeddings[style_indices]
-            local_indices = np.arange(len(style_indices))
-            
-            # Create style-specific DataFrame for visualizations
-            style_feedback_ids = df.loc[df['style'] == style, 'feedback_id'].to_numpy()
-            style_feedback_texts = df.loc[df['style'] == style, 'feedback_text'].to_numpy()
+            for style in styles:
+                style_label = str(style) if style is not None else "none"
+                logger.info(f"\n{'-'*80}")
+                logger.info(f"Clustering source: {source_label}, style: {style_label}")
+                logger.info(f"{'-'*80}")
+                
+                # Get indices for this source+style combination
+                style_mask = (df['source'] == source) & (df['style'] == style)
+                combo_indices = df[style_mask].index.to_numpy()
+                
+                logger.info(f"Processing {len(combo_indices)} records for source: {source_label}, style: {style_label}")
+                
+                # Run recursive clustering for this source+style partition
+                combo_embeddings = embeddings[combo_indices]
+                local_indices = np.arange(len(combo_indices))
+                
+                # Create source+style-specific data for visualizations
+                combo_feedback_ids = df.loc[style_mask, 'feedback_id'].to_numpy()
+                combo_feedback_texts = df.loc[style_mask, 'feedback_text'].to_numpy()
 
-            cluster_mapping = self._recursive_cluster(
-                style_embeddings, 
-                local_indices, 
-                parent_label=f"style_{style_label}",
-                feedback_ids=style_feedback_ids,  # ← Pass feedback_ids array
-                feedback_texts=style_feedback_texts  # ← Pass feedback_texts array
-            )
-            
-            # Map local indices back to global indices
-            for local_idx, cluster_label in cluster_mapping.items():
-                global_idx = style_indices[local_idx]
-                all_cluster_mappings[global_idx] = cluster_label
+                cluster_mapping = self._recursive_cluster(
+                    combo_embeddings, 
+                    local_indices, 
+                    parent_label=f"source_{source_label}.style_{style_label}",
+                    feedback_ids=combo_feedback_ids,
+                    feedback_texts=combo_feedback_texts
+                )
+                
+                # Map local indices back to global indices
+                for local_idx, cluster_label in cluster_mapping.items():
+                    global_idx = combo_indices[local_idx]
+                    all_cluster_mappings[global_idx] = cluster_label
         
         # Add cluster labels to dataframe
         df['cluster_label'] = df.index.map(all_cluster_mappings)
@@ -655,15 +685,17 @@ class RecursiveClusteringPipeline:
         unassigned_mask = df['cluster_label'].isna()
         if unassigned_mask.any():
             logger.warning(f"Found {unassigned_mask.sum()} records that could not be clustered (too few points)")
-            # Assign them to a special "unclustered" label based on their style
+            # Assign them to a special "unclustered" label based on their source and style
             for idx in df[unassigned_mask].index:
+                source = df.loc[idx, 'source']
                 style = df.loc[idx, 'style']
+                source_label = str(source) if source is not None else "none"
                 style_label = str(style) if style is not None else "none"
-                df.loc[idx, 'cluster_label'] = f"style_{style_label}.unclustered"
+                df.loc[idx, 'cluster_label'] = f"source_{source_label}.style_{style_label}.unclustered"
         
         df['cluster_depth'] = df['cluster_label'].apply(lambda x: x.count('.'))
 
-        logger.info(f"\nClustering complete: {df['cluster_label'].nunique()} unique clusters found across {len(styles)} styles")
+        logger.info(f"\nClustering complete: {df['cluster_label'].nunique()} unique clusters found across {len(sources)} sources and multiple styles")
 
         # Generate summary report if in local mode
         if self.local_mode:
