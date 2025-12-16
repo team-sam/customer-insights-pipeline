@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 import argparse
 import os
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import ast
 
 import pandas as pd
@@ -20,6 +20,7 @@ from src.config.settings import Settings
 from src.data_access.sql_client import SQLClient
 from src.data_access.cosmos_client import CosmosClient
 from src.models.schemas import FeedbackRecord, ClusterRecord
+from src.agents.llm_agent import ChatAgent
 
 logger = logging.getLogger(__name__)
 
@@ -748,11 +749,6 @@ class RecursiveClusteringPipeline:
 
     def _save_results(self, df: pd.DataFrame, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None):
         """Save clustering results back to database."""
-        from src.agents.llm_agent import ChatAgent
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        import logging
-        
-        logger = logging.getLogger(__name__)
         
         # Step 1: Update feedback table with cluster_id assignments
         logger.info("Updating feedback table with cluster assignments...")
@@ -776,7 +772,8 @@ class RecursiveClusteringPipeline:
             try:
                 # Sample up to 50 reviews for description
                 sample_size = min(50, len(cluster_df))
-                sample_reviews = cluster_df['feedback_text'].sample(n=sample_size, random_state=42).tolist()
+                # Use head() instead of sample() to avoid ValueError with small DataFrames
+                sample_reviews = cluster_df['feedback_text'].head(sample_size).tolist()
                 
                 # Generate description using LLM
                 description = chat_agent.describe_cluster(sample_reviews)
@@ -818,8 +815,8 @@ class RecursiveClusteringPipeline:
             # Extract source and style from cluster_label
             # Format: source_{source}.style_{style}.{hierarchy}
             parts = cluster_label.split('.')
-            source = None
-            style = None
+            source = 'unknown'  # Default value
+            style = None  # Can be None
             
             for part in parts:
                 if part.startswith('source_'):
@@ -834,7 +831,7 @@ class RecursiveClusteringPipeline:
                 cluster_id=cluster_label,
                 label=cluster_label,
                 description=cluster_descriptions.get(cluster_label, f"Cluster {cluster_label}"),
-                source=source or 'unknown',
+                source=source,
                 style=style,
                 cluster_depth=cluster_depth,
                 sample_feedback_ids=sample_feedback_ids,
