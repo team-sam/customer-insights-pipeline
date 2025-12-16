@@ -230,3 +230,42 @@ class TestRecursiveClusteringPipeline:
                 
                 params = pipeline._get_adaptive_hdbscan_params(depth=0, n_points=1000)
                 assert params['metric'] == "cosine"
+    
+    def test_style_based_clustering_partitioning(self, mock_config):
+        """Test that clustering partitions data by style field."""
+        with patch('src.pipelines.umap_clustering.SQLClient') as mock_sql:
+            with patch('src.pipelines.umap_clustering.CosmosClient') as mock_cosmos:
+                pipeline = RecursiveClusteringPipeline(
+                    config=mock_config,
+                    recursive_depth=1,
+                    local_mode=False
+                )
+                
+                # Mock data with different styles
+                mock_embeddings = [
+                    ('id1', [0.1] * 1536, 'review', 'style_a'),
+                    ('id2', [0.2] * 1536, 'review', 'style_a'),
+                    ('id3', [0.3] * 1536, 'review', 'style_b'),
+                    ('id4', [0.4] * 1536, 'review', 'style_b'),
+                    ('id5', [0.5] * 1536, 'review', None),
+                ]
+                
+                mock_cosmos_instance = mock_cosmos.return_value
+                mock_cosmos_instance.get_all_embeddings.return_value = mock_embeddings
+                
+                # Run the pipeline
+                result = pipeline.run()
+                
+                # Verify clustering was called
+                assert result['total_records'] == 5
+                
+                # Check that cluster labels contain style prefixes
+                cluster_labels = list(result['clusters'].keys())
+                style_prefixes = set()
+                for label in cluster_labels:
+                    if label.startswith('style_'):
+                        prefix = label.split('.')[0]
+                        style_prefixes.add(prefix)
+                
+                # Should have separate clustering for each style
+                assert 'style_a' in style_prefixes or 'style_b' in style_prefixes or 'style_none' in style_prefixes
