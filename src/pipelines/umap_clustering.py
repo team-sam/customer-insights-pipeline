@@ -48,7 +48,7 @@ class RecursiveClusteringPipeline:
         # Default UMAP parameters (base values for adaptation)
         self.base_umap_params = umap_params or {
             'n_neighbors': 15,
-            'n_components': 3,
+            'n_components': 8,
             'metric': 'cosine'
         }
         
@@ -173,19 +173,9 @@ class RecursiveClusteringPipeline:
         return params
 
     def _should_recurse(self, depth: int, n_points: int, n_clusters: int = 0, 
-                       cluster_quality: Optional[Dict[str, float]] = None) -> bool:
-        """
-        Make smart decisions about when to stop recursing.
+                    cluster_quality: Optional[Dict[str, float]] = None) -> bool:
+        """Make smart decisions about when to stop recursing."""
         
-        Args:
-            depth: Current recursion depth
-            n_points: Number of points in the cluster
-            n_clusters: Number of clusters found at this level
-            cluster_quality: Optional quality metrics dictionary
-            
-        Returns:
-            Boolean indicating whether to continue recursing
-        """
         # Check max depth
         if depth >= self.recursive_depth:
             return False
@@ -197,16 +187,24 @@ class RecursiveClusteringPipeline:
         
         # Check cluster quality if provided
         if cluster_quality is not None:
+            # NEW: More aggressive persistence check
+            mean_persistence = cluster_quality.get('mean_persistence', 1.0)
+            
+            # At depth 0-1: Be lenient (threshold = 0.05)
+            # At depth 2-3: Be stricter (threshold = 0.10)
+            # At depth 4+: Be very strict (threshold = 0.15)
+            persistence_threshold = 0.05 + (0.025 * min(depth, 4))
+            
+            if mean_persistence < persistence_threshold:
+                logger.info(f"Stopping recursion at depth {depth}: mean_persistence={mean_persistence:.3f} < threshold={persistence_threshold:.3f}")
+                return False
+            
             # Check for over-fragmentation
             if n_clusters > n_points / 10:
                 return False
             
             # Check for excessive noise
             if cluster_quality.get('noise_ratio', 0) > 0.5:
-                return False
-            
-            # Check for instability
-            if cluster_quality.get('mean_persistence', 1.0) < 0.05:
                 return False
         
         return True
