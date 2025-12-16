@@ -115,7 +115,7 @@ class SQLClient:
 
     def insert_tags(self, tags: List[TagRecord]) -> None:
         """
-        Insert tag assignments.
+        Insert or update tag assignments.
         """
         if not self.conn:
             self.connect()
@@ -123,14 +123,18 @@ class SQLClient:
         query = """
             INSERT INTO customer_insights.tags (feedback_id, tag_name, confidence_score, created_at)
             VALUES (%s, %s, %s, %s)
+            ON CONFLICT (feedback_id, tag_name)
+            DO UPDATE SET
+                confidence_score = EXCLUDED.confidence_score,
+                created_at = EXCLUDED.created_at
         """
 
         with self.conn.cursor() as cursor:
-            for tag in tags:
-                cursor.execute(
-                    query,
-                    (tag.feedback_id, tag.tag_name, tag.confidence_score, tag.created_at)
-                )
+            cursor.executemany(
+                query,
+                [(tag.feedback_id, tag.tag_name, tag.confidence_score, tag.created_at) 
+                for tag in tags]
+            )
             self.conn.commit()
 
 
