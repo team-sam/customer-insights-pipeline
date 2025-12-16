@@ -121,20 +121,25 @@ class SQLClient:
             self.connect()
 
         query = """
-            INSERT INTO customer_insights.tags (feedback_id, tag_name, confidence_score, created_at)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT (feedback_id, tag_name)
-            DO UPDATE SET
-                confidence_score = EXCLUDED.confidence_score,
-                created_at = EXCLUDED.created_at
+            MERGE INTO customer_insights.tags AS target
+            USING (VALUES (%s, %s, %s, %s)) AS source 
+                (feedback_id, tag_name, confidence_score, created_at)
+            ON target.feedback_id = source.feedback_id AND target.tag_name = source.tag_name
+            WHEN MATCHED THEN
+                UPDATE SET 
+                    confidence_score = source.confidence_score,
+                    created_at = source.created_at
+            WHEN NOT MATCHED THEN
+                INSERT (feedback_id, tag_name, confidence_score, created_at)
+                VALUES (source.feedback_id, source.tag_name, source.confidence_score, source.created_at);
         """
 
         with self.conn.cursor() as cursor:
-            cursor.executemany(
-                query,
-                [(tag.feedback_id, tag.tag_name, tag.confidence_score, tag.created_at) 
-                for tag in tags]
-            )
+            for tag in tags:
+                cursor.execute(
+                    query,
+                    (tag.feedback_id, tag.tag_name, tag.confidence_score, tag.created_at)
+                )
             self.conn.commit()
 
 
