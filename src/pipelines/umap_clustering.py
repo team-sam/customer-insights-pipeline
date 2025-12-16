@@ -8,7 +8,6 @@ from datetime import datetime, timedelta, timezone
 import logging
 import argparse
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import ast
 
 import pandas as pd
@@ -783,23 +782,12 @@ class RecursiveClusteringPipeline:
                 logger.error(f"Error generating description for cluster {cluster_label}: {e}")
                 return cluster_label, f"Cluster containing {len(cluster_df)} feedback items"
         
-        # Use ThreadPoolExecutor to parallelize LLM calls
+        # Generate descriptions sequentially for each cluster
         cluster_descriptions = {}
-        with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
-            futures = {
-                executor.submit(generate_description_for_cluster, label, group): label
-                for label, group in cluster_groups
-            }
-            
-            for future in as_completed(futures):
-                try:
-                    label, description = future.result()
-                    cluster_descriptions[label] = description
-                    logger.info(f"Generated description for cluster: {label}")
-                except Exception as e:
-                    label = futures[future]
-                    logger.error(f"Failed to generate description for cluster {label}: {e}")
-                    cluster_descriptions[label] = f"Cluster {label}"
+        for label, group in cluster_groups:
+            label, description = generate_description_for_cluster(label, group)
+            cluster_descriptions[label] = description
+            logger.info(f"Generated description for cluster: {label}")
         
         # Step 3: Create ClusterRecord objects and insert into database
         logger.info("Inserting cluster metadata into database...")
