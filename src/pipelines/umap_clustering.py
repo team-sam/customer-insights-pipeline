@@ -15,8 +15,6 @@ import pandas as pd
 import numpy as np
 import umap
 import hdbscan
-from sklearn.preprocessing import StandardScaler
-
 
 from src.config.settings import Settings
 from src.data_access.sql_client import SQLClient
@@ -106,6 +104,10 @@ class RecursiveClusteringPipeline:
         # Percentage-based constraint: never exceed 5% of dataset size
         max_neighbors = int(n_points * 0.05)
         n_neighbors = min(n_neighbors, max_neighbors)
+
+        min_neighbors_required = 2 * params['n_components']
+        if n_neighbors < min_neighbors_required:
+            n_neighbors = min_neighbors_required 
         
         # Convert to integer
         params['n_neighbors'] = int(n_neighbors)
@@ -113,12 +115,16 @@ class RecursiveClusteringPipeline:
         # Adjust min_dist based on cluster size
         if n_points < 100:
             params['min_dist'] = 0.0
+            params['spread'] = 1.0
         elif n_points < 500:
             params['min_dist'] = 0.05
+            params['spread'] = 1.5
         else:
             params['min_dist'] = 0.1
-        
+            params['spread'] = 2.0
+
         return params
+
 
     def _get_adaptive_hdbscan_params(self, depth: int, n_points: int) -> Dict[str, Any]:
         """
@@ -208,9 +214,15 @@ class RecursiveClusteringPipeline:
     def _evaluate_umap_quality(self, original_embeddings: np.ndarray, reduced_embeddings: np.ndarray, n_neighbors: int = 15) -> Dict[str, float]:
 
         from sklearn.manifold import trustworthiness
-        
-        trust = trustworthiness(original_embeddings, reduced_embeddings, n_neighbors=n_neighbors)
-        
+
+        n_points = original_embeddings.shape[0]
+        if n_points > 5000:
+            sample_size = 5000
+            idx = np.random.RandomState(42).choice(n_points, sample_size, replace=False)
+            trust = trustworthiness(original_embeddings[idx], reduced_embeddings[idx], n_neighbors=n_neighbors)
+        else:
+            trust = trustworthiness(original_embeddings, reduced_embeddings, n_neighbors=n_neighbors)
+
         return {
             'trustworthiness': float(trust)
         }
@@ -304,6 +316,9 @@ class RecursiveClusteringPipeline:
         if not self.local_mode or df_subset is None:
             return
         
+        # Check if we have feedback_text column (we won't in new implementation)
+        has_text = 'feedback_text' in df_subset.columns
+        
         # Group by cluster and get sample reviews
         analysis = []
         for cluster_id in df_subset['cluster_label'].unique():
@@ -311,7 +326,7 @@ class RecursiveClusteringPipeline:
             
             # Get sample feedback text if available
             sample_texts = []
-            if 'feedback_text' in cluster_df.columns:
+            if has_text:
                 sample_texts = cluster_df['feedback_text'].head(10).tolist()
             
             analysis.append({
@@ -319,10 +334,9 @@ class RecursiveClusteringPipeline:
                 'size': len(cluster_df),
                 'percentage': f"{len(cluster_df) / len(df_subset) * 100:.1f}%",
                 'sample_count': len(sample_texts),
-                'samples': sample_texts
+                'samples': sample_texts if has_text else []  # Empty list if no text
             })
-        
-        # Save to CSV
+            # Save to CSV
         analysis_df = pd.DataFrame(analysis)
         safe_label = parent_label.replace('.', '_')
         filename = f"{self.output_dir}/cluster_analysis_{safe_label}_depth{depth}.csv"
@@ -429,7 +443,7 @@ class RecursiveClusteringPipeline:
 
 
 
-    def _recursive_cluster(self, embeddings: np.ndarray, indices: np.ndarray, parent_label: str = "root", current_depth: int = 0, df: pd.DataFrame = None) -> Dict[int, str]:
+    def _recursive_cluster(self, embeddings: np.ndarray, indices: np.ndarray, parent_label: str = "root", current_depth: int = 0, feedback_ids: Optional[np.ndarray] = None, feedback_texts: Optional[np.ndarray] = None ) -> Dict[int, str]:
 
         # Check if we should recurse (initial check with n_clusters=0)
         if not self._should_recurse(current_depth, len(indices), n_clusters=0):
@@ -478,12 +492,15 @@ class RecursiveClusteringPipeline:
         self.cluster_hierarchy[parent_label] = hierarchy_entry
 
         # Visualize in local mode
-        if self.local_mode:
-            df_subset = df.iloc[indices].copy()
-            temp_labels = labels.copy()
-            df_subset['temp_cluster'] = temp_labels
+        if self.local_mode and feedback_ids is not None:
+
+            viz_data = {
+                'feedback_id': feedback_ids[indices],  
+                'temp_cluster': labels                  
+            }
+            df_viz = pd.DataFrame(viz_data)
             
-            self._visualize_clusters(reduced_data, labels, parent_label, current_depth, df_subset)
+            self._visualize_clusters(reduced_data, labels, parent_label, current_depth, df_viz)
         
         # Build hierarchical labels
         cluster_mapping = {}
@@ -506,6 +523,7 @@ class RecursiveClusteringPipeline:
                     len(cluster_indices),
                     n_clusters=n_clusters,
                     cluster_quality=cluster_metrics
+
                 )
                 
                 if should_recurse:
@@ -514,17 +532,24 @@ class RecursiveClusteringPipeline:
                         cluster_indices,
                         hierarchical_label,
                         current_depth + 1,
-                        df
+                        feedback_ids,
+                        feedback_texts
                     )
                     cluster_mapping.update(sub_clusters)
                 else:
                     cluster_mapping.update({idx: hierarchical_label for idx in cluster_indices})
         
-        # Analyze cluster content if in local mode
-        if self.local_mode and df is not None:
-            df_subset = df.iloc[indices].copy()
-            df_subset['cluster_label'] = df_subset.index.map(cluster_mapping)
-            self._analyze_cluster_content(df_subset, parent_label, current_depth)
+             
+        if self.local_mode and feedback_ids is not None:
+            analysis_data = {
+                'feedback_id': feedback_ids[indices],
+                'cluster_label': [cluster_mapping[idx] for idx in indices]
+            }
+            if feedback_texts is not None:
+                analysis_data['feedback_text'] = feedback_texts[indices]
+            
+            df_analysis = pd.DataFrame(analysis_data)
+            self._analyze_cluster_content(df_analysis, parent_label, current_depth)
         
         return cluster_mapping
 
@@ -564,7 +589,8 @@ class RecursiveClusteringPipeline:
         # Convert to DataFrame
 
         df = pd.DataFrame(feedback_records)
-        df = df.rename(columns={0: 'feedback_id', 1: 'vector', 2: 'source', 3: 'style'})
+        
+        df = df.rename(columns={0: 'feedback_id', 1: 'vector', 2: 'source', 3: 'feedback_text', 4: 'style'})
         
         if self.local_mode:
             print(df.head())
@@ -577,26 +603,11 @@ class RecursiveClusteringPipeline:
                 return np.array(ast.literal_eval(vec_str), dtype=np.float32)
             return np.array(vec_str, dtype=np.float32)
 
-        # Parallel processing with optional progress bar
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            if self.local_mode:
-                from tqdm import tqdm
-                embeddings_list = list(
-                    tqdm(
-                        executor.map(parse_vector, df['vector']),
-                        total=len(df),
-                        desc="Parsing embeddings"
-                    )
-                )
-            else:
-                embeddings_list = list(executor.map(parse_vector, df['vector']))
-
-        embeddings = np.array(embeddings_list)
+        embeddings_list = [parse_vector(v) for v in df['vector']]
+        embeddings = np.array(embeddings_list, dtype=np.float32)
         
         logger.info(f"Embeddings shape: {embeddings.shape}")
-        # Normalize embeddings
-        scaler = StandardScaler()
-        embeddings = scaler.fit_transform(embeddings)
+
 
         # Partition by style and run clustering on each partition
         styles = df['style'].unique()
@@ -621,13 +632,15 @@ class RecursiveClusteringPipeline:
             local_indices = np.arange(len(style_indices))
             
             # Create style-specific DataFrame for visualizations
-            style_df = df.iloc[style_indices].copy()
-            
+            style_feedback_ids = df.loc[df['style'] == style, 'feedback_id'].to_numpy()
+            style_feedback_texts = df.loc[df['style'] == style, 'feedback_text'].to_numpy()
+
             cluster_mapping = self._recursive_cluster(
                 style_embeddings, 
                 local_indices, 
                 parent_label=f"style_{style_label}",
-                df=style_df
+                feedback_ids=style_feedback_ids,  # ← Pass feedback_ids array
+                feedback_texts=style_feedback_texts  # ← Pass feedback_texts array
             )
             
             # Map local indices back to global indices
@@ -715,7 +728,7 @@ def main():
     parser.add_argument("--min-cluster-pct", type=float, default=0.02, help="Min cluster size as percentage of data.")
     parser.add_argument("--min-sample-pct", type=float, default=0.003, help="Min samples as percentage of data for HDBSCAN.")
     parser.add_argument("--n-neighbors", type=int, default=15, help="UMAP n_neighbors parameter.")
-    parser.add_argument("--n-components", type=int, default=2, help="UMAP n_components (dimensions).")
+    parser.add_argument("--n-components", type=int, default=3, help="UMAP n_components (dimensions).")
     parser.add_argument("--local", action='store_true', help="Enable local mode with visualizations and analysis.")
     parser.add_argument("--output-dir", type=str, default="./cluster_output", help="Output directory for local mode files.")
 

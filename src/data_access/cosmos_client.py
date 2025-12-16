@@ -178,6 +178,7 @@ class CosmosClient:
                 row[0],  # feedback_id (str)
                 row[1],  # vector (list of floats)
                 row[2],  # source (str)
+                row[3],  # feedback_text (str)
                 row[4]   # style (Optional[str])
             )
             for row in results
