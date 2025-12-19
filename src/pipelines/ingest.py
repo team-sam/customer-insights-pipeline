@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class IngestionPipeline:
     """Pipeline for ingesting and processing feedback records over a flexible date range."""
     
-    def __init__(self, config: Settings, categories: Optional[List[str]] = None, embeddings_only: bool = False):
+    def __init__(self, config: Settings, categories: Optional[List[str]] = None, embeddings_only: bool = False, skip_embedded: bool = False):
         """
         Initialize the ingestion pipeline.
         
@@ -30,9 +30,11 @@ class IngestionPipeline:
             config: Application settings
             categories: List of tag categories for LLM tagging. If None, uses default categories from FeedbackTagger.
             embeddings_only: If True, only generate embeddings without LLM tagging.
+            skip_embedded: If True, skip items that have already been embedded (tracked in SQL Server).
         """
         self.config = config
         self.embeddings_only = embeddings_only
+        self.skip_embedded = skip_embedded
         self.sql_client = SQLClient(config)
         self.cosmos_client = CosmosClient(config)
         self.embedder = Embedder(config)
@@ -79,6 +81,10 @@ class IngestionPipeline:
             self.sql_client.connect()
             self.cosmos_client.connect()
             
+            # Initialize embedded items tracking table
+            logger.info("Initializing embedded items tracking table")
+            self.sql_client.initialize_embedded_items_table()
+            
             # Fetch feedback records based on date range
             logger.info("Fetching feedback records from SQL database")
             feedback_records = self.sql_client.get_new_feedback(
@@ -86,6 +92,16 @@ class IngestionPipeline:
                 end_date=end_date,
                 limit=limit
             )
+            
+            # Filter out already-embedded items if requested
+            if self.skip_embedded:
+                embedded_ids = set(self.sql_client.get_embedded_feedback_ids())
+                original_count = len(feedback_records)
+                feedback_records = [r for r in feedback_records if r.feedback_id not in embedded_ids]
+                filtered_count = original_count - len(feedback_records)
+                if filtered_count > 0:
+                    logger.info(f"Filtered out {filtered_count} already-embedded items")
+            
             total_records = len(feedback_records)
             logger.info(f"Found {total_records} feedback records to process")
             
@@ -175,6 +191,17 @@ class IngestionPipeline:
         logger.info(f"Saving {len(embedding_records)} embeddings to Cosmos DB")
         self.cosmos_client.insert_embeddings(embedding_records)
         
+        # Sync embedding metadata to SQL Server for tracking
+        logger.info(f"Syncing {len(embedding_records)} embedding records to SQL Server")
+        embedded_items = [
+            {
+                'feedback_id': record.feedback_id,
+                'embedded_at': datetime.now(timezone.utc)
+            }
+            for record in embedding_records
+        ]
+        self.sql_client.insert_embedded_items(embedded_items)
+        
         return embedding_records
     
     def _process_tags_batch(self, feedback_batch: List[FeedbackRecord]) -> List[TagRecord]:
@@ -255,6 +282,11 @@ def main():
         action='store_true',
         help='Only generate embeddings without LLM tagging'
     )
+    parser.add_argument(
+        '--skip-embedded',
+        action='store_true',
+        help='Skip items that have already been embedded (useful for resuming failed jobs)'
+    )
     
     args = parser.parse_args()
     
@@ -285,7 +317,7 @@ def main():
     config = Settings()
     
     # Run ingestion pipeline
-    pipeline = IngestionPipeline(config, embeddings_only=args.embeddings_only)
+    pipeline = IngestionPipeline(config, embeddings_only=args.embeddings_only, skip_embedded=args.skip_embedded)
     stats = pipeline.run(
         start_date=start_date,
         end_date=end_date,

@@ -25,6 +25,74 @@ class SQLClient:
         if self.conn:
             self.conn.close()
 
+    def initialize_embedded_items_table(self) -> None:
+        """
+        Create the embedded_items tracking table if it doesn't exist.
+        This table tracks which feedback items have been embedded in Cosmos DB.
+        """
+        if not self.conn:
+            self.connect()
+
+        query = """
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'embedded_items' AND schema_id = SCHEMA_ID('customer_insights'))
+            BEGIN
+                CREATE TABLE customer_insights.embedded_items (
+                    feedback_id VARCHAR(255) PRIMARY KEY,
+                    embedded_at DATETIME NOT NULL
+                )
+            END
+        """
+
+        with self.conn.cursor() as cursor:
+            cursor.execute(query)
+            self.conn.commit()
+
+    def insert_embedded_items(self, items: List[dict]) -> None:
+        """
+        Insert or update embedded item records to track what has been embedded.
+        
+        Args:
+            items: List of dicts with feedback_id and embedded_at datetime
+        """
+        if not self.conn:
+            self.connect()
+
+        query = """
+            MERGE INTO customer_insights.embedded_items AS target
+            USING (VALUES (%s, %s)) AS source (feedback_id, embedded_at)
+            ON target.feedback_id = source.feedback_id
+            WHEN MATCHED THEN
+                UPDATE SET embedded_at = source.embedded_at
+            WHEN NOT MATCHED THEN
+                INSERT (feedback_id, embedded_at)
+                VALUES (source.feedback_id, source.embedded_at);
+        """
+
+        with self.conn.cursor() as cursor:
+            for item in items:
+                cursor.execute(query, (item['feedback_id'], item['embedded_at']))
+            self.conn.commit()
+
+    def get_embedded_feedback_ids(self) -> List[str]:
+        """
+        Get list of feedback IDs that have already been embedded.
+        
+        Returns:
+            List of feedback_id strings
+        """
+        if not self.conn:
+            self.connect()
+
+        query = """
+            SELECT feedback_id
+            FROM customer_insights.embedded_items
+        """
+
+        with self.conn.cursor() as cursor:
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            return [row[0] for row in rows]
+
     def get_new_feedback(self, last_processed_date: Optional[datetime] = None, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None, limit: Optional[int] = None) -> List[FeedbackRecord]:
 
         if not self.conn:
