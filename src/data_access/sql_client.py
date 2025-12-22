@@ -1,5 +1,5 @@
 import pymssql
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from datetime import datetime
 from src.config.settings import Settings
 from src.models.schemas import FeedbackRecord, TagRecord, ClusterRecord
@@ -25,8 +25,123 @@ class SQLClient:
         if self.conn:
             self.conn.close()
 
-    def get_new_feedback(self, last_processed_date: Optional[datetime] = None, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None, limit: Optional[int] = None) -> List[FeedbackRecord]:
+    def initialize_embedded_items_table(self) -> None:
+        """
+        Create the embedded_items tracking table if it doesn't exist.
+        This table tracks which feedback items have been embedded in Cosmos DB.
+        """
+        if not self.conn:
+            self.connect()
 
+        query = """
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'embedded_items' AND schema_id = SCHEMA_ID('customer_insights'))
+            BEGIN
+                CREATE TABLE customer_insights.embedded_items (
+                    feedback_id VARCHAR(255) PRIMARY KEY,
+                    embedded_at DATETIME NOT NULL
+                )
+            END
+        """
+
+        with self.conn.cursor() as cursor:
+            cursor.execute(query)
+            self.conn.commit()
+
+    def insert_embedded_items(self, items: List[dict]) -> None:
+        """
+        Insert or update embedded item records to track what has been embedded.
+        
+        Args:
+            items: List of dicts with feedback_id and embedded_at datetime
+        """
+        if not self.conn:
+            self.connect()
+
+        query = """
+            MERGE INTO customer_insights.embedded_items AS target
+            USING (VALUES (%s, %s)) AS source (feedback_id, embedded_at)
+            ON target.feedback_id = source.feedback_id
+            WHEN MATCHED THEN
+                UPDATE SET embedded_at = source.embedded_at
+            WHEN NOT MATCHED THEN
+                INSERT (feedback_id, embedded_at)
+                VALUES (source.feedback_id, source.embedded_at);
+        """
+
+        with self.conn.cursor() as cursor:
+            for item in items:
+                cursor.execute(query, (item['feedback_id'], item['embedded_at']))
+            self.conn.commit()
+
+    def get_embedded_feedback_ids(self) -> List[str]:
+        """
+        Get list of feedback IDs that have already been embedded.
+        
+        Returns:
+            List of feedback_id strings
+        """
+        if not self.conn:
+            self.connect()
+
+        query = """
+            SELECT feedback_id
+            FROM customer_insights.embedded_items
+        """
+
+        with self.conn.cursor() as cursor:
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            return [row[0] for row in rows]
+    
+    def sync_embeddings_from_cosmos(self, embedded_items: List[Tuple[str, str]]) -> int:
+        """
+        Sync embedded items from Cosmos DB to SQL Server tracking table.
+        This is used at the start of the ingestion process to populate the tracking table.
+        
+        Args:
+            embedded_items: List of tuples (feedback_id, created_at/embedded_at)
+        
+        Returns:
+            Number of items synced
+        """
+        if not self.conn:
+            self.connect()
+        
+        if not embedded_items:
+            return 0
+        
+        query = """
+            MERGE INTO customer_insights.embedded_items AS target
+            USING (VALUES (%s, %s)) AS source (feedback_id, embedded_at)
+            ON target.feedback_id = source.feedback_id
+            WHEN MATCHED THEN
+                UPDATE SET embedded_at = source.embedded_at
+            WHEN NOT MATCHED THEN
+                INSERT (feedback_id, embedded_at)
+                VALUES (source.feedback_id, source.embedded_at);
+        """
+        
+        with self.conn.cursor() as cursor:
+            for feedback_id, embedded_at in embedded_items:
+                cursor.execute(query, (feedback_id, embedded_at))
+            self.conn.commit()
+        
+        return len(embedded_items)
+
+    def get_new_feedback(self, last_processed_date: Optional[datetime] = None, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None, limit: Optional[int] = None, skip_embedded: bool = False) -> List[FeedbackRecord]:
+        """
+        Retrieve feedback records based on date range and optional filters.
+        
+        Args:
+            last_processed_date: Only get records created after this date
+            start_date: Start date for filtering feedback (inclusive)
+            end_date: End date for filtering feedback (inclusive)
+            limit: Maximum number of records to return
+            skip_embedded: If True, exclude items that have already been embedded (uses LEFT JOIN with embedded_items table)
+        
+        Returns:
+            List of FeedbackRecord objects
+        """
         if not self.conn:
             self.connect()
 
@@ -34,6 +149,15 @@ class SQLClient:
 			SELECT feedback_id, feedback_text, feedback_source, created_at, customer_insights.feedback.sku, customer_insights.feedback.category, rating, cluster_id,[inventory_info].Style as style
             FROM customer_insights.feedback
 			LEFT JOIN [dbo].[inventory_info] AS [inventory_info] ON TRIM(customer_insights.feedback.[sku]) = TRIM([inventory_info].[SKU])
+        """
+        
+        # Add LEFT JOIN to exclude embedded items if skip_embedded is True
+        if skip_embedded:
+            query += """
+			LEFT JOIN customer_insights.embedded_items AS [embedded_items] ON customer_insights.feedback.feedback_id = [embedded_items].feedback_id
+            """
+        
+        query += """
             WHERE created_at IS NOT NULL
 				AND [inventory_info].Style is not null
               AND feedback_text IS NOT NULL
@@ -42,6 +166,10 @@ class SQLClient:
             AND UPPER(LTRIM(RTRIM(feedback_text))) NOT IN ('NA', 'N/A', 'N.A.', 'N.A', 'NOT APPLICABLE')
               AND feedback_source IS NOT NULL
         """
+        
+        # Add filter to exclude embedded items
+        if skip_embedded:
+            query += " AND [embedded_items].feedback_id IS NULL"
 
         params = []
         if last_processed_date:

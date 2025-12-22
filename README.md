@@ -80,6 +80,11 @@ python -m src.pipelines.ingest --days-back 7 --batch-size 50 --limit 1000
 python -m src.pipelines.ingest --days-back 1 --embeddings-only
 ```
 
+**Resume failed ingestion (skip already embedded items):**
+```bash
+python -m src.pipelines.ingest --start-date 2024-01-01 --end-date 2024-01-31 --skip-embedded
+```
+
 **Available options:**
 - `--days-back N`: Process feedback from the last N days
 - `--start-date YYYY-MM-DD`: Start date for processing (inclusive)
@@ -87,6 +92,34 @@ python -m src.pipelines.ingest --days-back 1 --embeddings-only
 - `--batch-size N`: Number of records to process in each batch (default: from config)
 - `--limit N`: Maximum number of records to process
 - `--embeddings-only`: Only generate embeddings without LLM tagging
+- `--skip-embedded`: Skip items that have already been embedded (useful for resuming failed jobs)
+
+#### Resumable Ingestion
+
+The pipeline tracks which feedback items have been embedded in a SQL Server table (`customer_insights.embedded_items`). This enables resuming ingestion jobs that fail mid-run:
+
+**How it works:**
+- When `--skip-embedded` is used, the pipeline syncs all existing embeddings from Cosmos DB to SQL Server at startup
+- The SQL query uses a LEFT JOIN to exclude items already in the tracking table
+- This ensures only unembedded items are processed, avoiding duplicate work
+
+**Example workflow:**
+
+1. **Initial run fails partway through:**
+   ```bash
+   python -m src.pipelines.ingest --start-date 2024-01-01 --end-date 2024-01-31
+   # Job fails after processing 1000 of 5000 records
+   ```
+
+2. **Resume from where it left off:**
+   ```bash
+   python -m src.pipelines.ingest --start-date 2024-01-01 --end-date 2024-01-31 --skip-embedded
+   # Syncs embeddings from Cosmos DB to SQL Server
+   # SQL query automatically excludes already-embedded items
+   # Only processes the 4000 remaining records
+   ```
+
+The tracking table stores the `feedback_id` and `embedded_at` timestamp for each item successfully embedded to Cosmos DB. Metadata is synced after each batch completes.
 
 ### Clustering Pipeline
 

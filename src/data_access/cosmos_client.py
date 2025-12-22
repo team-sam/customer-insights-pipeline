@@ -183,3 +183,20 @@ class CosmosClient:
             )
             for row in results
             ]
+    
+    def get_all_embedded_ids(self) -> List[Tuple[str, str]]:
+        """
+        Get all feedback IDs that have been embedded with their timestamps.
+        
+        Returns:
+            List of tuples (feedback_id, created_at)
+        """
+        if not self.conn:
+            self.connect()
+        
+        query = "SELECT feedback_id, created_at FROM embeddings"
+        
+        with self.conn.cursor() as cursor:
+            cursor.execute(query)
+            results = cursor.fetchall()
+            return [(row[0], row[1]) for row in results]
