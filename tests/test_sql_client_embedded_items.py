@@ -177,3 +177,52 @@ class TestSQLClientEmbeddedItems:
         
         # Verify execute was still called
         cursor.execute.assert_called_once()
+    
+    @patch('src.data_access.sql_client.pymssql.connect')
+    def test_sync_embeddings_from_cosmos_empty(self, mock_connect, mock_config):
+        """Test syncing empty list of embeddings."""
+        conn, cursor = _create_mock_connection()
+        mock_connect.return_value = conn
+        
+        client = SQLClient(mock_config)
+        client.connect()
+        
+        # Sync empty list
+        result = client.sync_embeddings_from_cosmos([])
+        
+        # Verify no SQL was executed
+        cursor.execute.assert_not_called()
+        
+        # Verify return value is 0
+        assert result == 0
+    
+    @patch('src.data_access.sql_client.pymssql.connect')
+    def test_sync_embeddings_from_cosmos_with_items(self, mock_connect, mock_config):
+        """Test syncing embeddings from Cosmos to SQL Server."""
+        conn, cursor = _create_mock_connection()
+        mock_connect.return_value = conn
+        
+        client = SQLClient(mock_config)
+        client.connect()
+        
+        # Prepare items to sync (tuples of feedback_id, created_at)
+        items = [
+            ('fb001', datetime(2024, 1, 15, tzinfo=timezone.utc)),
+            ('fb002', datetime(2024, 1, 16, tzinfo=timezone.utc)),
+            ('fb003', datetime(2024, 1, 17, tzinfo=timezone.utc))
+        ]
+        
+        result = client.sync_embeddings_from_cosmos(items)
+        
+        # Verify execute was called 3 times (once per item)
+        assert cursor.execute.call_count == 3
+        
+        # Verify MERGE statement was used
+        call_args = cursor.execute.call_args[0][0]
+        assert "MERGE INTO customer_insights.embedded_items" in call_args
+        
+        # Verify commit was called
+        conn.commit.assert_called_once()
+        
+        # Verify return value is correct
+        assert result == 3

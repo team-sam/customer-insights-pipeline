@@ -126,7 +126,6 @@ class TestEmbeddedItemsTracking:
         # Setup mocks
         mock_sql_instance = mock_sql_client.return_value
         mock_sql_instance.get_new_feedback.return_value = sample_feedback_records
-        mock_sql_instance.get_embedded_feedback_ids.return_value = ["fb001"]  # fb001 already embedded
         
         mock_cosmos_instance = mock_cosmos_client.return_value
         
@@ -140,8 +139,16 @@ class TestEmbeddedItemsTracking:
         pipeline = IngestionPipeline(mock_config, skip_embedded=False)
         stats = pipeline.run()
         
-        # Verify get_embedded_feedback_ids was NOT called
-        mock_sql_instance.get_embedded_feedback_ids.assert_not_called()
+        # Verify get_all_embedded_ids was NOT called on CosmosClient
+        mock_cosmos_instance.get_all_embedded_ids.assert_not_called()
+        
+        # Verify sync_embeddings_from_cosmos was NOT called
+        mock_sql_instance.sync_embeddings_from_cosmos.assert_not_called()
+        
+        # Verify get_new_feedback was called with skip_embedded=False
+        mock_sql_instance.get_new_feedback.assert_called_once()
+        call_kwargs = mock_sql_instance.get_new_feedback.call_args[1]
+        assert call_kwargs['skip_embedded'] == False
         
         # Verify all 3 records were processed
         assert stats["total_records"] == 3
@@ -156,12 +163,18 @@ class TestEmbeddedItemsTracking:
         mock_config, sample_feedback_records, sample_vectors
     ):
         """Test that already-embedded items are skipped when skip_embedded is True."""
-        # Setup mocks
+        # Setup mocks - simulating that SQL query returns only 1 record after filtering
+        one_record = [sample_feedback_records[2]]  # Only fb003
+        
         mock_sql_instance = mock_sql_client.return_value
-        mock_sql_instance.get_new_feedback.return_value = sample_feedback_records
-        mock_sql_instance.get_embedded_feedback_ids.return_value = ["fb001", "fb002"]  # 2 already embedded
+        mock_sql_instance.get_new_feedback.return_value = one_record
+        mock_sql_instance.sync_embeddings_from_cosmos.return_value = 2  # 2 items synced
         
         mock_cosmos_instance = mock_cosmos_client.return_value
+        mock_cosmos_instance.get_all_embedded_ids.return_value = [
+            ("fb001", datetime(2024, 1, 1, tzinfo=timezone.utc)),
+            ("fb002", datetime(2024, 1, 2, tzinfo=timezone.utc))
+        ]
         
         mock_embedder_instance = mock_embedder.return_value
         mock_embedder_instance.embed_texts.return_value = [[0.3] * 1536]  # Only 1 vector needed
@@ -173,8 +186,16 @@ class TestEmbeddedItemsTracking:
         pipeline = IngestionPipeline(mock_config, skip_embedded=True)
         stats = pipeline.run()
         
-        # Verify get_embedded_feedback_ids was called
-        mock_sql_instance.get_embedded_feedback_ids.assert_called_once()
+        # Verify get_all_embedded_ids was called on CosmosClient
+        mock_cosmos_instance.get_all_embedded_ids.assert_called_once()
+        
+        # Verify sync_embeddings_from_cosmos was called with the embedded items
+        mock_sql_instance.sync_embeddings_from_cosmos.assert_called_once()
+        
+        # Verify get_new_feedback was called with skip_embedded=True
+        mock_sql_instance.get_new_feedback.assert_called_once()
+        call_kwargs = mock_sql_instance.get_new_feedback.call_args[1]
+        assert call_kwargs['skip_embedded'] == True
         
         # Verify only 1 record was processed (fb003)
         assert stats["total_records"] == 1
@@ -194,10 +215,17 @@ class TestEmbeddedItemsTracking:
         mock_config, sample_feedback_records
     ):
         """Test behavior when all items have already been embedded."""
-        # Setup mocks
+        # Setup mocks - SQL query returns empty list after filtering
         mock_sql_instance = mock_sql_client.return_value
-        mock_sql_instance.get_new_feedback.return_value = sample_feedback_records
-        mock_sql_instance.get_embedded_feedback_ids.return_value = ["fb001", "fb002", "fb003"]
+        mock_sql_instance.get_new_feedback.return_value = []
+        mock_sql_instance.sync_embeddings_from_cosmos.return_value = 3  # All 3 items synced
+        
+        mock_cosmos_instance = mock_cosmos_client.return_value
+        mock_cosmos_instance.get_all_embedded_ids.return_value = [
+            ("fb001", datetime(2024, 1, 1, tzinfo=timezone.utc)),
+            ("fb002", datetime(2024, 1, 2, tzinfo=timezone.utc)),
+            ("fb003", datetime(2024, 1, 3, tzinfo=timezone.utc))
+        ]
         
         mock_cosmos_instance = mock_cosmos_client.return_value
         

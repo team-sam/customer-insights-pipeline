@@ -209,7 +209,8 @@ class TestIngestionPipeline:
         mock_sql_instance.get_new_feedback.assert_called_once_with(
             start_date=start_date,
             end_date=end_date,
-            limit=None
+            limit=None,
+            skip_embedded=False
         )
         
         # Verify stats include date range
@@ -289,6 +290,7 @@ class TestIngestionPipeline:
         mock_sql_instance.get_new_feedback.assert_called_once()
         call_kwargs = mock_sql_instance.get_new_feedback.call_args[1]
         assert call_kwargs['limit'] == 50
+        assert call_kwargs['skip_embedded'] == False
     
     @patch('src.pipelines.ingest.FeedbackTagger')
     @patch('src.pipelines.ingest.Embedder')

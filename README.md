@@ -98,6 +98,13 @@ python -m src.pipelines.ingest --start-date 2024-01-01 --end-date 2024-01-31 --s
 
 The pipeline tracks which feedback items have been embedded in a SQL Server table (`customer_insights.embedded_items`). This enables resuming ingestion jobs that fail mid-run:
 
+**How it works:**
+- When `--skip-embedded` is used, the pipeline syncs all existing embeddings from Cosmos DB to SQL Server at startup
+- The SQL query uses a LEFT JOIN to exclude items already in the tracking table
+- This ensures only unembedded items are processed, avoiding duplicate work
+
+**Example workflow:**
+
 1. **Initial run fails partway through:**
    ```bash
    python -m src.pipelines.ingest --start-date 2024-01-01 --end-date 2024-01-31
@@ -107,10 +114,12 @@ The pipeline tracks which feedback items have been embedded in a SQL Server tabl
 2. **Resume from where it left off:**
    ```bash
    python -m src.pipelines.ingest --start-date 2024-01-01 --end-date 2024-01-31 --skip-embedded
+   # Syncs embeddings from Cosmos DB to SQL Server
+   # SQL query automatically excludes already-embedded items
    # Only processes the 4000 remaining records
    ```
 
-The tracking table stores the `feedback_id` and `embedded_at` timestamp for each item successfully embedded to Cosmos DB.
+The tracking table stores the `feedback_id` and `embedded_at` timestamp for each item successfully embedded to Cosmos DB. Metadata is synced after each batch completes.
 
 ### Clustering Pipeline
 

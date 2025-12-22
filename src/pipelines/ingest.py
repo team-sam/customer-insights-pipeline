@@ -85,22 +85,22 @@ class IngestionPipeline:
             logger.info("Initializing embedded items tracking table")
             self.sql_client.initialize_embedded_items_table()
             
+            # Sync embeddings from Cosmos DB to SQL Server if skip_embedded is enabled
+            if self.skip_embedded:
+                logger.info("Syncing embeddings from Cosmos DB to SQL Server tracking table")
+                embedded_items = self.cosmos_client.get_all_embedded_ids()
+                synced_count = self.sql_client.sync_embeddings_from_cosmos(embedded_items)
+                logger.info(f"Synced {synced_count} embedded items from Cosmos DB to SQL Server")
+            
             # Fetch feedback records based on date range
+            # If skip_embedded is True, the SQL query will use LEFT JOIN to exclude already-embedded items
             logger.info("Fetching feedback records from SQL database")
             feedback_records = self.sql_client.get_new_feedback(
                 start_date=start_date,
                 end_date=end_date,
-                limit=limit
+                limit=limit,
+                skip_embedded=self.skip_embedded
             )
-            
-            # Filter out already-embedded items if requested
-            if self.skip_embedded:
-                embedded_ids = set(self.sql_client.get_embedded_feedback_ids())
-                original_count = len(feedback_records)
-                feedback_records = [r for r in feedback_records if r.feedback_id not in embedded_ids]
-                filtered_count = original_count - len(feedback_records)
-                if filtered_count > 0:
-                    logger.info(f"Filtered out {filtered_count} already-embedded items")
             
             total_records = len(feedback_records)
             logger.info(f"Found {total_records} feedback records to process")
