@@ -1,16 +1,85 @@
 # Customer Insights Pipeline
 
-A Python-based data pipeline for processing customer feedback using embeddings, clustering, and LLM-based tagging.
+A Python-based data pipeline for processing customer feedback (reviews, return reasons, and support chat) using embeddings, clustering, and LLM-based tagging to discover hierarchical customer segments and identify key themes in product feedback.
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           DATA FLOW                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   SQL Server (Feedback Source)                                              │
+│   └── customer_insights.feedback                                            │
+│            │                                                                │
+│            ▼                                                                │
+│   ┌────────────────────┐                                                    │
+│   │  Ingestion Pipeline │                                                   │
+│   ├────────────────────┤                                                    │
+│   │  • Embedder        │──────────────▶ Cosmos DB (PostgreSQL + pgvector)  │
+│   │    (OpenAI API)    │               └── embeddings table (1536-dim)     │
+│   │                    │                                                    │
+│   │  • FeedbackTagger  │──────────────▶ SQL Server                         │
+│   │    (OpenAI LLM)    │               └── customer_insights.tags          │
+│   └────────────────────┘                                                    │
+│            │                                                                │
+│            ▼                                                                │
+│   ┌────────────────────┐                                                    │
+│   │  Clustering Pipeline│                                                   │
+│   ├────────────────────┤                                                    │
+│   │  • UMAP reduction  │                                                    │
+│   │  • HDBSCAN cluster │──────────────▶ SQL Server                         │
+│   │  • Recursive zoom  │               ├── customer_insights.clusters      │
+│   │  • LLM descriptions│               └── feedback.cluster_id             │
+│   └────────────────────┘                                                    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ## Features
 
 - **Flexible Ingestion**: Process feedback over any date range with daily, custom, or full backfill options
-- **Embedding Generation**: Generate embeddings for customer feedback using OpenAI's text-embedding models
-- **Vector Storage**: Store embeddings in PostgreSQL with pgvector extension
+- **Resumable Processing**: Track embedded items to resume failed jobs without duplicate work
+- **Embedding Generation**: Generate embeddings using OpenAI's `text-embedding-3-small` model (1536 dimensions)
+- **Vector Storage**: Store embeddings in Azure Cosmos DB for PostgreSQL with pgvector extension
 - **Advanced Clustering**: **UMAP + HDBSCAN with Recursive Clustering** - Discover hierarchical customer segments by "zooming in" on clusters
-- **Tagging**: Automatically tag feedback with predefined categories using LLM
-- **SQL Integration**: Read feedback from SQL Server and store results
+- **LLM Tagging**: Automatically categorize feedback into 30 predefined product issue categories
+- **Source Partitioning**: Separate analysis for reviews, return reasons, and chat feedback
+- **SQL Integration**: Read feedback from SQL Server and store results (tags, clusters, assignments)
 - **Azure Integration**: Automated deployment to Azure Blob Storage for Azure Batch execution via Azure Data Factory
+
+## Feedback Categories
+
+The LLM tagger classifies feedback into 30 predefined categories:
+
+| Category | Description |
+|----------|-------------|
+| Waterproof Leak | Water penetration issues |
+| Upper Knit Separation | Upper material coming apart |
+| Insole Issue | Insole defects or discomfort |
+| Inner Lining Rip | Internal lining damage |
+| Glue Gap | Adhesive failures |
+| Discolouration | Color changes/fading |
+| Sizes not standard | General sizing inconsistency |
+| Toe Area too narrow/big | Toe box fit issues |
+| Instep too small/high | Instep fit problems |
+| Shoe too narrow/wide | Width issues |
+| Half size requests | Need for half sizes |
+| No heel lock/heel slip | Heel fit problems |
+| Lack of grip/traction | Sole grip issues |
+| Squeaky sound | Noise during wear |
+| Not breathable | Ventilation problems |
+| Hard to put on/take off | Accessibility issues |
+| Lack of support | Insufficient arch/foot support |
+| Heel Cup - too big | Oversized heel cup |
+| Smelly | Odor issues |
+| Back Heel Rubbing | Friction causing irritation |
+| Warping | Shape deformation |
+| Stains | Marking/staining issues |
+| Looks different than picture | Visual discrepancy |
+| Blisters | Skin irritation |
+| Too Bulky | Excessive volume |
+| Too Heavy | Weight concerns |
 
 ## Installation
 ```bash
@@ -125,7 +194,7 @@ The tracking table stores the `feedback_id` and `embedded_at` timestamp for each
 
 #### UMAP + HDBSCAN with Recursive Clustering
 
-This approach implements the methodology described in [this article](https://link-to-article.com) for discovering hierarchical customer segments through dimensionality reduction and density-based clustering.
+This approach discovers hierarchical customer segments through dimensionality reduction and density-based clustering.
 
 **How it works:**
 1. **UMAP (Uniform Manifold Approximation and Projection)**: Reduces high-dimensional embeddings while preserving local and global structure
@@ -218,3 +287,75 @@ For setup instructions, see [AZURE_DEPLOYMENT.md](AZURE_DEPLOYMENT.md).
 
 - Core components tested: schemas, embedder, llm_agent, ingestion pipeline
 - Tests include multithreading and rate limit retry scenarios
+- 28 test files with comprehensive coverage including:
+  - Unit tests for data models, embedding, and LLM agents
+  - Integration tests for full pipelines
+  - Concurrency and thread safety tests
+  - Rate limit retry behavior validation
+
+## Database Schema
+
+### SQL Server (`Vessi_DB`)
+
+| Table | Description |
+|-------|-------------|
+| `customer_insights.feedback` | Source feedback with `feedback_id`, `feedback_text`, `feedback_source`, `created_at`, `sku`, `category`, `rating`, `cluster_id` |
+| `customer_insights.tags` | Tag assignments with `feedback_id`, `tag_name`, `confidence_score` |
+| `customer_insights.clusters` | Cluster metadata with hierarchical labels, descriptions, record counts |
+| `customer_insights.embedded_items` | Tracks which feedback has been embedded (enables resumable jobs) |
+| `dbo.inventory_info` | Product info mapping SKU → Style |
+
+### Cosmos DB for PostgreSQL (pgvector)
+
+| Table | Description |
+|-------|-------------|
+| `embeddings` | 1536-dimensional vectors with `feedback_id`, `vector`, `model`, `source`, `feedback_text`, `style` |
+
+## Project Structure
+
+```
+src/
+├── config/
+│   └── settings.py          # Environment-based configuration (Pydantic)
+├── data_access/
+│   ├── sql_client.py        # SQL Server operations
+│   └── cosmos_client.py     # Cosmos DB/pgvector operations
+├── embedding/
+│   └── embedder.py          # OpenAI embedding generation with retry
+├── agents/
+│   └── llm_agent.py         # ChatAgent, FeedbackTagger for LLM operations
+├── models/
+│   └── schemas.py           # FeedbackRecord, EmbeddingRecord, TagRecord, ClusterRecord
+└── pipelines/
+    ├── ingest.py            # Main ingestion pipeline (embeddings + tagging)
+    └── umap_clustering.py   # Clustering pipeline with recursive zoom
+
+tests/                       # 28 test files
+scripts/                     # Azure Batch execution scripts
+```
+
+## Environment Variables
+
+```bash
+# OpenAI
+OPENAI_API_KEY=sk-...
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_LLM_MODEL=gpt-5-nano
+
+# SQL Server
+SQL_SERVER_HOST=your-server.database.windows.net
+SQL_SERVER_DATABASE=your_db
+SQL_SERVER_USERNAME=admin
+SQL_SERVER_PASSWORD=...
+
+# Cosmos DB for PostgreSQL
+POSTGRES_HOST=your-cosmos.postgres.cosmos.azure.com
+POSTGRES_DATABASE=citus
+POSTGRES_USERNAME=citus
+POSTGRES_PASSWORD=...
+POSTGRES_SSLMODE=require
+
+# Pipeline
+BATCH_SIZE=1000
+MAX_WORKERS=5
+```
