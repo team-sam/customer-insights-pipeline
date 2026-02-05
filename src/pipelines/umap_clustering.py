@@ -9,6 +9,7 @@ import logging
 import argparse
 import os
 import ast
+import time
 
 import pandas as pd
 import numpy as np
@@ -470,8 +471,11 @@ class RecursiveClusteringPipeline:
         # Get adaptive UMAP parameters and apply UMAP
         umap_params = self._get_adaptive_umap_params(current_depth, len(indices))
         logger.info(f"Applying UMAP with adaptive params: {umap_params}")
+        umap_start = time.time()
         reducer = umap.UMAP(**umap_params)
         reduced_data = reducer.fit_transform(subset_embeddings)
+        umap_elapsed = time.time() - umap_start
+        logger.info(f"UMAP completed in {umap_elapsed:.1f}s for {len(indices)} points")
      
         if self.local_mode:
             umap_metrics = self._evaluate_umap_quality(subset_embeddings, reduced_data, n_neighbors=umap_params['n_neighbors'])
@@ -480,8 +484,11 @@ class RecursiveClusteringPipeline:
         # Get adaptive HDBSCAN parameters and apply HDBSCAN
         hdbscan_params = self._get_adaptive_hdbscan_params(current_depth, len(indices))
         logger.info(f"Applying HDBSCAN with adaptive params: {hdbscan_params}")
+        hdbscan_start = time.time()
         clusterer = hdbscan.HDBSCAN(**hdbscan_params)
         labels = clusterer.fit_predict(reduced_data)
+        hdbscan_elapsed = time.time() - hdbscan_start
+        logger.info(f"HDBSCAN completed in {hdbscan_elapsed:.1f}s")
         
         if not hasattr(clusterer, 'labels_') or len(labels) == 0:
             logger.warning(f"HDBSCAN failed at {parent_label} (depth {current_depth})")
@@ -592,18 +599,20 @@ class RecursiveClusteringPipeline:
         logger.info(f"Clustering with UMAP + HDBSCAN (recursive depth: {self.recursive_depth})")
 
         # Fetch feedback data
+        logger.info("Connecting to databases...")
         self.sql_client.connect()
         self.cosmos_client.connect()
 
-        logger.info(f"Start date: {start_date}, End date: {end_date}")
+        logger.info(f"Fetching embeddings (start_date={start_date}, end_date={end_date})...")
+        fetch_start = time.time()
         feedback_records = self.cosmos_client.get_all_embeddings(
             start_date=start_date,
             end_date=end_date,
             print_query=self.local_mode
-            
-        )
 
-        logger.info(f"Fetched {len(feedback_records)} feedback records for clustering")
+        )
+        fetch_elapsed = time.time() - fetch_start
+        logger.info(f"Fetched {len(feedback_records)} feedback records in {fetch_elapsed:.1f}s")
 
         if not feedback_records:
             logger.info("No records to cluster.")
@@ -632,22 +641,30 @@ class RecursiveClusteringPipeline:
                 return np.array(ast.literal_eval(vec_str), dtype=np.float32)
             return np.array(vec_str, dtype=np.float32)
 
+        logger.info(f"Parsing {len(df)} embedding vectors...")
+        parse_start = time.time()
         embeddings_list = [parse_vector(v) for v in df['vector']]
         embeddings = np.array(embeddings_list, dtype=np.float32)
-        
-        logger.info(f"Embeddings shape: {embeddings.shape}")
+        parse_elapsed = time.time() - parse_start
+        logger.info(f"Parsed embeddings in {parse_elapsed:.1f}s - shape: {embeddings.shape}")
 
 
         # Partition by source first, then by style within each source
         sources = df['source'].unique()
-        logger.info(f"Found {len(sources)} unique sources: {sources}")
-        
+        total_sources = len(sources)
+        logger.info(f"Found {total_sources} unique sources: {sources}")
+
+        # Count total source+style combinations for progress tracking
+        total_combinations = sum(df[df['source'] == s]['style'].nunique() for s in sources)
+        current_combination = 0
+        pipeline_start = time.time()
+
         all_cluster_mappings = {}
-        
-        for source in sources:
+
+        for source_idx, source in enumerate(sources, 1):
             source_label = str(source) if source is not None else "none"
             logger.info(f"\n{'='*80}")
-            logger.info(f"Processing source: {source_label}")
+            logger.info(f"Processing source {source_idx}/{total_sources}: {source_label}")
             logger.info(f"{'='*80}")
             
             # Get data for this source
@@ -656,12 +673,17 @@ class RecursiveClusteringPipeline:
             
             # Now partition by style within this source
             styles = source_df['style'].unique()
-            logger.info(f"Found {len(styles)} unique styles within source {source_label}: {styles}")
-            
-            for style in styles:
+            total_styles = len(styles)
+            logger.info(f"Found {total_styles} unique styles within source {source_label}: {styles}")
+
+            for style_idx, style in enumerate(styles, 1):
+                current_combination += 1
                 style_label = str(style) if style is not None else "none"
+                elapsed = time.time() - pipeline_start
+                progress_pct = (current_combination / total_combinations) * 100
                 logger.info(f"\n{'-'*80}")
-                logger.info(f"Clustering source: {source_label}, style: {style_label}")
+                logger.info(f"[{progress_pct:.0f}%] Clustering {current_combination}/{total_combinations}: source={source_label}, style={style_label}")
+                logger.info(f"Elapsed time: {elapsed/60:.1f} min")
                 logger.info(f"{'-'*80}")
                 
                 # Get indices for this source+style combination
@@ -708,7 +730,15 @@ class RecursiveClusteringPipeline:
         
         df['cluster_depth'] = df['cluster_label'].apply(lambda x: x.count('.'))
 
-        logger.info(f"\nClustering complete: {df['cluster_label'].nunique()} unique clusters found across {len(sources)} sources and multiple styles")
+        clustering_elapsed = time.time() - pipeline_start
+        logger.info(f"\n{'='*80}")
+        logger.info(f"CLUSTERING COMPLETE")
+        logger.info(f"{'='*80}")
+        logger.info(f"Total time: {clustering_elapsed/60:.1f} min")
+        logger.info(f"Records processed: {len(df)}")
+        logger.info(f"Unique clusters: {df['cluster_label'].nunique()}")
+        logger.info(f"Sources: {len(sources)}")
+        logger.info(f"Source+Style combinations: {total_combinations}")
 
         # Generate summary report if in local mode
         if self.local_mode:
@@ -748,24 +778,20 @@ class RecursiveClusteringPipeline:
 
     def _save_results(self, df: pd.DataFrame, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None):
         """Save clustering results back to database."""
-        
-        # Step 1: Update feedback table with cluster_id assignments
-        logger.info("Updating feedback table with cluster assignments...")
-        cluster_assignments = [
-            {'feedback_id': row['feedback_id'], 'cluster_id': row['cluster_label']}
-            for _, row in df.iterrows()
-        ]
-        self.sql_client.update_feedback_clusters(cluster_assignments)
-        logger.info(f"Updated {len(cluster_assignments)} feedback records with cluster assignments")
-        
-        # Step 2: Generate cluster descriptions using LLM
-        logger.info("Generating cluster descriptions using LLM...")
+        save_start = time.time()
+
+        # Step 1: Generate cluster descriptions using LLM
+        logger.info("="*60)
+        logger.info("STEP 1/3: Generating cluster descriptions using LLM...")
+        logger.info("="*60)
+        llm_start = time.time()
         chat_agent = ChatAgent(self.config)
-        
+
         # Group by cluster_label and prepare cluster records
         cluster_groups = df.groupby('cluster_label')
+        total_clusters = len(cluster_groups)
         cluster_records = []
-        
+
         def generate_description_for_cluster(cluster_label, cluster_df):
             """Helper function to generate description for a single cluster."""
             try:
@@ -773,24 +799,33 @@ class RecursiveClusteringPipeline:
                 sample_size = min(50, len(cluster_df))
                 # Use head() instead of sample() to avoid ValueError with small DataFrames
                 sample_reviews = cluster_df['feedback_text'].head(sample_size).tolist()
-                
+
                 # Generate description using LLM
                 description = chat_agent.describe_cluster(sample_reviews)
-                
+
                 return cluster_label, description
             except Exception as e:
                 logger.error(f"Error generating description for cluster {cluster_label}: {e}")
                 return cluster_label, f"Cluster containing {len(cluster_df)} feedback items"
-        
+
         # Generate descriptions sequentially for each cluster
         cluster_descriptions = {}
-        for label, group in cluster_groups:
+        for cluster_idx, (label, group) in enumerate(cluster_groups, 1):
             label, description = generate_description_for_cluster(label, group)
             cluster_descriptions[label] = description
-            logger.info(f"Generated description for cluster: {label}")
+            elapsed = time.time() - llm_start
+            avg_time = elapsed / cluster_idx
+            remaining = avg_time * (total_clusters - cluster_idx)
+            logger.info(f"[{cluster_idx}/{total_clusters}] Generated description for: {label} (est. {remaining/60:.1f} min remaining)")
         
-        # Step 3: Create ClusterRecord objects and insert into database
-        logger.info("Inserting cluster metadata into database...")
+        llm_elapsed = time.time() - llm_start
+        logger.info(f"LLM descriptions completed in {llm_elapsed/60:.1f} min")
+
+        # Step 2: Create ClusterRecord objects and insert into database
+        logger.info("="*60)
+        logger.info("STEP 2/3: Inserting cluster metadata into database...")
+        logger.info("="*60)
+        insert_start = time.time()
         
         # Use provided date range or default to current time
         default_start = start_date if start_date else datetime.now(timezone.utc)
@@ -832,7 +867,26 @@ class RecursiveClusteringPipeline:
         
         # Insert all cluster records
         self.sql_client.insert_clusters(cluster_records)
-        logger.info(f"Inserted {len(cluster_records)} cluster records into database")
+        insert_elapsed = time.time() - insert_start
+        logger.info(f"Inserted {len(cluster_records)} cluster records in {insert_elapsed:.1f}s")
+
+        # Step 3: Update feedback table with cluster_id assignments
+        logger.info("="*60)
+        logger.info("STEP 3/3: Updating feedback table with cluster assignments...")
+        logger.info("="*60)
+        update_start = time.time()
+        cluster_assignments = [
+            {'feedback_id': row['feedback_id'], 'cluster_id': row['cluster_label']}
+            for _, row in df.iterrows()
+        ]
+        self.sql_client.update_feedback_clusters(cluster_assignments)
+        update_elapsed = time.time() - update_start
+        logger.info(f"Updated {len(cluster_assignments)} feedback records in {update_elapsed:.1f}s")
+
+        total_save_elapsed = time.time() - save_start
+        logger.info("="*60)
+        logger.info(f"SAVE COMPLETE - Total time: {total_save_elapsed/60:.1f} min")
+        logger.info("="*60)
 
 
 def main():
@@ -849,7 +903,7 @@ def main():
     parser.add_argument("--start-date", type=str, help="Start date (YYYY-MM-DD).")
     parser.add_argument("--end-date", type=str, help="End date (YYYY-MM-DD).")
     parser.add_argument("--limit", type=int, default=None, help="Max records to cluster.")
-    parser.add_argument("--recursive-depth", type=int, default=5, help="How many levels to recurse (1 = no recursion).")
+    parser.add_argument("--recursive-depth", type=int, default=2, help="How many levels to recurse (1 = no recursion).")
     #parser.add_argument("--min-cluster-size", type=int, default=20, help="Minimum cluster size for HDBSCAN.")
     parser.add_argument("--min-cluster-pct", type=float, default=0.02, help="Min cluster size as percentage of data.")
     parser.add_argument("--min-sample-pct", type=float, default=0.003, help="Min samples as percentage of data for HDBSCAN.")
@@ -890,7 +944,7 @@ def main():
     result = pipeline.run(
         start_date=start_date,
         end_date=end_date,
-        
+       
     )
     
     if args.local:

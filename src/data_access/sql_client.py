@@ -3,6 +3,7 @@ from typing import List, Optional, Tuple
 from datetime import datetime
 from src.config.settings import Settings
 from src.models.schemas import FeedbackRecord, TagRecord, ClusterRecord
+from tqdm import tqdm
 
 class SQLClient:
     """SQL Server client for feedback data and results."""
@@ -282,21 +283,57 @@ class SQLClient:
 
 
 
-    def insert_clusters(self, clusters: List[ClusterRecord]) -> None:
+
+    def update_feedback_clusters(self, cluster_assignments: List[dict]) -> None:
         """
-        Insert cluster metadata.
+        Update feedback records with cluster assignments.
+
+        Args:
+            cluster_assignments: List of dicts with feedback_id and cluster_id
         """
-        if not clusters:
+        if not cluster_assignments:
             return
 
-        if not self.conn:
-            self.connect()
+        query = """
+            UPDATE customer_insights.feedback
+            SET cluster_id = %s
+            WHERE feedback_id = %s
+        """
+
+        params = [(a['cluster_id'], a['feedback_id']) for a in cluster_assignments]
+
+        batch_size = 100
+        total_batches = (len(params) + batch_size - 1) // batch_size
+        
+        for i in tqdm(range(0, len(params), batch_size), 
+                    desc="Updating feedback clusters", 
+                    total=total_batches):
+            self.reconnect()
+            
+            batch = params[i:i + batch_size]
+            
+            try:
+                with self.conn.cursor() as cursor:
+                    cursor.executemany(query, batch)
+                    self.conn.commit()
+            except Exception as e:
+                print(f"\nError on batch {i//batch_size + 1}: {e}")
+                self.reconnect()
+                with self.conn.cursor() as cursor:
+                    cursor.executemany(query, batch)
+                    self.conn.commit()
+
+
+    def insert_clusters(self, clusters: List[ClusterRecord]) -> None:
+        """Insert cluster metadata."""
+        if not clusters:
+            return
 
         query = """
             MERGE INTO customer_insights.clusters AS target
             USING (VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)) AS source
                 (cluster_id, cluster_label, cluster_description, sample_feedback_ids, record_count,
-                 period_start, period_end, created_at, style, source, cluster_depth)
+                period_start, period_end, created_at, style, source, cluster_depth)
             ON target.cluster_id = source.cluster_id
             WHEN MATCHED THEN
                 UPDATE SET
@@ -321,37 +358,29 @@ class SQLClient:
 
         params = [
             (cluster.cluster_id, cluster.label, cluster.description,
-             ','.join(cluster.sample_feedback_ids), cluster.record_count,
-             cluster.period_start, cluster.period_end, cluster.created_at,
-             cluster.style, cluster.source, cluster.cluster_depth)
+            ','.join(cluster.sample_feedback_ids), cluster.record_count,
+            cluster.period_start, cluster.period_end, cluster.created_at,
+            cluster.style, cluster.source, cluster.cluster_depth)
             for cluster in clusters
         ]
 
-        with self.conn.cursor() as cursor:
-            cursor.executemany(query, params)
-            self.conn.commit()
-
-    def update_feedback_clusters(self, cluster_assignments: List[dict]) -> None:
-        """
-        Update feedback records with cluster assignments.
-
-        Args:
-            cluster_assignments: List of dicts with feedback_id and cluster_id
-        """
-        # Reconnect to ensure fresh connection (avoids timeout after long clustering)
-        self.reconnect()
-
-        query = """
-            UPDATE customer_insights.feedback
-            SET cluster_id = %s
-            WHERE feedback_id = %s
-        """
-
-        # Prepare data as list of tuples for executemany
-        params = [(a['cluster_id'], a['feedback_id']) for a in cluster_assignments]
-
-        with self.conn.cursor() as cursor:
-            cursor.executemany(query, params)
-            self.conn.commit()
-
-
+        batch_size = 100
+        total_batches = (len(params) + batch_size - 1) // batch_size
+        
+        for i in tqdm(range(0, len(params), batch_size), 
+                    desc="Inserting clusters", 
+                    total=total_batches):
+            self.reconnect()
+            
+            batch = params[i:i + batch_size]
+            
+            try:
+                with self.conn.cursor() as cursor:
+                    cursor.executemany(query, batch)
+                    self.conn.commit()
+            except Exception as e:
+                print(f"\nError on batch {i//batch_size + 1}: {e}")
+                self.reconnect()
+                with self.conn.cursor() as cursor:
+                    cursor.executemany(query, batch)
+                    self.conn.commit()
