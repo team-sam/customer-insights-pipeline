@@ -7,19 +7,34 @@ A toolkit for exploring customer feedback data using Claude Code. Ask questions 
 ### 1. Install Anaconda
 Download and install [Anaconda](https://www.anaconda.com/download) if you don't have it.
 
-### 2. Set Up Your Environment
+### 2. Create the Conda Environment
 Open Anaconda Prompt and run:
 ```bash
 cd path/to/insights-user
-pip install -r requirements.txt
+conda env create -f environment.yml
+```
+This creates a conda environment called `insights-user` with Python 3.11 and all required dependencies.
+
+### 3. Activate the Environment
+```bash
+conda activate insights-user
 ```
 
-### 3. Configure Credentials
-1. Copy `config_template.env` to `.env`
+### 4. Configure Credentials
+1. Copy `config_template.env` to `.env`:
+   ```bash
+   cp config_template.env .env
+   ```
 2. Fill in your credentials (ask your administrator if you don't have them)
 
-### 4. Start Claude Code
+### 5. Start Claude Code
 Open this folder in Claude Code and start asking questions!
+
+### Updating the Environment
+If `environment.yml` has been updated, sync your environment:
+```bash
+conda env update -f environment.yml --prune
+```
 
 ---
 
