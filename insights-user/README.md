@@ -20,21 +20,9 @@ This creates a conda environment called `insights-user` with Python 3.11 and all
 conda activate insights-user
 ```
 
-### 4. Configure Credentials
-1. Copy `config_template.env` to `.env`:
-   ```bash
-   cp config_template.env .env
-   ```
-2. Fill in your credentials (ask your administrator if you don't have them)
-
-### 5. Start Claude Code
+### 4. Start Claude Code
 Open this folder in Claude Code and start asking questions!
 
-### Updating the Environment
-If `environment.yml` has been updated, sync your environment:
-```bash
-conda env update -f environment.yml --prune
-```
 
 ---
 
