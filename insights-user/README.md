@@ -171,7 +171,7 @@ Just say what you want and where.
 ### Feedback Sources
 - **Reviews** -- Customer product reviews with 1-5 star ratings
 - **Returns** -- Reasons customers give when returning products
-- **Chat** -- Support chat conversations
+
 
 ### Product Styles
 Products are grouped by style (e.g., Weekend, Everyday, Cityscape, Sunday Slipper, Alta High Top, Kids Weekend, etc.)
