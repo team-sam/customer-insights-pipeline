@@ -24,8 +24,36 @@ conda activate insights-user
 ### 4. Set Up Credentials
 Copy `config_template.env` to `.env` and fill in your credentials. Contact your administrator if you don't have them.
 
-### 5. Open in Claude Code
-Open this folder in Claude Code. Before you ask your first question, **paste the context block below** so Claude knows how to work with the data.
+### 5. Install Claude Code
+Claude Code requires Node.js. Follow these steps in order:
+
+**a) Install Node.js** (one-time, skip if you already have it):
+- Download the **LTS** version from [https://nodejs.org](https://nodejs.org)
+- Run the installer with default settings
+- **Close and reopen** Anaconda Prompt after installing
+
+**b) Install Claude Code** (one-time):
+Open Anaconda Prompt and run:
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+**c) Verify it works:**
+```bash
+claude --version
+```
+If you see a version number, you're good to go.
+
+### 6. Launch Claude Code
+Every time you want to use this toolkit, open Anaconda Prompt and run these three commands:
+```bash
+conda activate insights-user
+cd path/to/insights-user
+claude
+```
+**Important:** Always activate the conda environment first. This is what gives Claude access to the Python packages it needs to query the databases.
+
+Before you ask your first question, **paste the context block below** so Claude knows how to work with the data.
 
 ---
 
