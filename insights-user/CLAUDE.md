@@ -203,32 +203,59 @@ Users can run these directly:
 
 5. **examples/query_examples.sql** - Reference SQL queries
 
-## How to Help Users
+## How to Pick the Right Approach
 
-When users ask questions, you can:
+When the user asks a question, select the best strategy:
 
-1. **Write and run Python scripts** to query the databases
-2. **Use existing example scripts** when they fit the use case
-3. **Generate reports** with pandas DataFrames
-4. **Create visualizations** with matplotlib/seaborn
-5. **Export data to CSV** for further analysis
+### 1. STRUCTURED QUERY (SQL Server)
+**Use when:** The user wants counts, percentages, rankings, comparisons, tag breakdowns, date-range filtering, ratings analysis, or any exact numbers.
+**How:** Write a Python script that connects to SQL Server with pymssql and runs the appropriate query.
+**Examples:**
+- "How many reviews are tagged as Waterproof Leak?" -> COUNT on tags table
+- "What percentage of Weekend returns mention sizing?" -> JOIN tags + feedback + inventory_info, filter, calculate percentage
+- "Compare complaint counts between reviews and returns" -> GROUP BY feedback_source with tag counts
 
-### Example user requests and approaches:
+### 2. SIMILARITY SEARCH (Vector Database)
+**Use when:** The user describes a complaint, phrase, or topic in natural language and wants to find real feedback that sounds like it. Also use when they say "find similar", "search for feedback about", or describe a specific customer experience.
+**How:**
+1. Embed the user's phrase using OpenAI (`text-embedding-3-small` model, key from .env `OPENAI_API_KEY`)
+2. Search the Cosmos DB `embeddings` table using cosine distance: `vector <=> %s::vector AS distance`
+3. Return feedback_text, source, style, and distance for the top N results
+**Examples:**
+- "Find feedback similar to 'my shoes leak in the rain'" -> embed phrase, search vectors, return top matches
+- "Search for reviews about arch pain" -> embed "arch pain", search vectors
+- "Find 20 reviews most similar to 'the toe area is too tight'" -> embed, search, LIMIT 20
 
-- "What are the main complaints about Weekend shoes?"
-  -> Query clusters for style=Weekend, show descriptions
+### 3. SEARCH + SUMMARIZE (RAG pattern)
+**Use when:** The user wants a summary, synthesis, or analysis of what customers are saying about a topic. Key signals: "summarize", "what are customers saying about", "analyze feedback about", "main patterns", "key themes".
+**How:**
+1. Embed the topic/phrase using OpenAI
+2. Search the vector database for the 30-50 most relevant results
+3. Read through the retrieved feedback
+4. Write a summary highlighting: main themes/patterns, how common each pattern is, representative quotes, which styles/sources are most affected
+**Examples:**
+- "What are customers saying about waterproof issues? Summarize" -> embed, retrieve 50, summarize themes with quotes
+- "Find feedback about heel slip and summarize the patterns" -> embed, retrieve 30-50, synthesize
+- "Summarize comfort complaints for the Everyday style" -> embed, search with style filter, summarize
 
-- "Find reviews similar to 'my shoes leak in the rain'"
-  -> Use similarity_search.py or write a script with OpenAI embeddings
+### 4. CLUSTER BROWSING (SQL Server)
+**Use when:** The user asks about themes, clusters, or what the AI has already discovered. They want a high-level overview of pre-computed groupings.
+**How:** Query the `customer_insights.clusters` table, show cluster_description, record_count, style, source. Filter by cluster_depth for broad vs specific themes.
+**Examples:**
+- "What are the main complaint themes for Weekend shoes?" -> SELECT from clusters WHERE style = 'Weekend'
+- "Show me the biggest feedback clusters" -> SELECT from clusters ORDER BY record_count DESC
 
-- "How many people complained about sizing last month?"
-  -> Query tags table for sizing-related tags with date filter
+### 5. COMBINED / REPORTS
+For reports, combine multiple approaches. For exports, save results to CSV and tell the user the file path. For charts, use matplotlib/seaborn.
 
-- "Show me the distribution of ratings by product style"
-  -> Join feedback with inventory_info, group by style, visualize
+## General Guidelines
 
-- "Export all negative reviews for the Everyday style"
-  -> Query feedback where rating <= 2 and style = 'Everyday', export to CSV
+- Always load credentials from `.env` using `dotenv`
+- Always show results clearly with context (not just raw data)
+- For similarity search, always show the actual feedback text and the distance/similarity score
+- For summaries, include representative quotes from the retrieved feedback
+- If the user's question could be answered multiple ways, prefer the richer approach (e.g., search+summarize over just a SQL count)
+- Use existing example scripts when they fit: `examples/similarity_search.py`, `examples/read_clusters.py`, `examples/read_feedback.py`, `examples/recluster.py`
 
 ## Environment Setup
 
