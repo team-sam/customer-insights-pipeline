@@ -158,7 +158,7 @@ class SQLClient:
         query = """
 			SELECT feedback_id, feedback_text, feedback_source, created_at, customer_insights.feedback.sku, customer_insights.feedback.category, rating, cluster_id,[inventory_info].Style as style
             FROM customer_insights.feedback
-			LEFT JOIN [dbo].[inventory_info] AS [inventory_info] ON customer_insights.feedback.[sku]) = [inventory_info].[SKU]
+			LEFT JOIN [dbo].[inventory_info] AS [inventory_info] ON customer_insights.feedback.[sku] = [inventory_info].[SKU]
         """
         
         # Add LEFT JOIN to exclude embedded items if skip_embedded is True
